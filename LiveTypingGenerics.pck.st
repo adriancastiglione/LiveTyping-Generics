@@ -1,6 +1,6 @@
-'From Cuis 6.0 [latest update: #5706] on 3 May 2023 at 4:21:25 am'!
+'From Cuis 6.0 [latest update: #5706] on 19 July 2023 at 1:21:32 am'!
 'Description This package adds to LiveTyping the capability of detecting polymorphic parameters in generic classes such as Array. '!
-!provides: 'LiveTypingGenerics' 0 6!
+!provides: 'LiveTypingGenerics' 0 7!
 !requires: 'LiveTyping' 1 97 nil!
 SystemOrganization addCategory: 'LiveTypingGenerics-Foundation'!
 SystemOrganization addCategory: 'LiveTypingGenerics-Core'!
@@ -501,49 +501,49 @@ LiveTypingGenerics class
 
 
 !LiveTypeTests commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !RawToLiveTypesAdapterTests commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !TooltipTests commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !TypeNodeTests commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !LiveType commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !ClassLiveType commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !FixedType commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !GenericType commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !EmptyType commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !UnionType commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !CollectionsContentType commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !LiveTypesPrinter commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !RawToLiveTypesAdapter commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !SupertypeDetective commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !TypeNode commentStamp: '<historical>' prior: 0!
-This class was taken from previous work by alf & mtqp, 2020, and modified and extended as needed.!
+This class was taken from previous work by alf & mtqp, 2021, and modified and extended as needed.!
 
 !GAVisitor methodsFor: 'analizing' stamp: 'AC 4/24/2023 12:33:44'!
 driver: aGenericAnalysisDriver
@@ -3813,7 +3813,7 @@ print: liveTypes upTo: aNumberOfTypes withDelimiter: printDelimiter
 	
 ! !
 
-!LiveTypesPrinter methodsFor: 'as yet unclassified' stamp: 'AC 5/1/2023 20:32:05'!
+!LiveTypesPrinter methodsFor: 'as yet unclassified' stamp: 'AC 6/19/2023 21:02:50'!
 print: typesTreeArray withDelimiter: printDelimiter
 	| treeBound treeGenerics |
 	
@@ -3834,10 +3834,11 @@ print: typesTreeArray withDelimiter: printDelimiter
 		treeGenerics ifNotEmpty: [
 				stream nextPutAll: ' # '.
 			].
+		treeGenerics do: [:generic | self print: {generic} withDelimiter: false] separatedBy: [stream nextPutAll: ' | '].
 		(i = typesTreeArray size) ifFalse: [stream nextPutAll: ', '].
 	].
-	treeGenerics do: [:generic | self print: {generic} withDelimiter: false] separatedBy: [stream nextPutAll: ' | '].
-		printDelimiter ifTrue: [
+	
+	printDelimiter ifTrue: [
 		stream nextPut: $>.
 	].! !
 
@@ -5313,6 +5314,13 @@ example9
 	tmp1 at: 1.
 	! !
 
+!GenericsExamples methodsFor: 'as yet unclassified' stamp: 'AC 7/7/2023 00:17:41'!
+m1
+
+	| tmptmp |
+	tmptmp := OrderedCollection with: 'str'.
+	tmptmp := SortedCollection with: 1.! !
+
 !GenericsExamples methodsFor: 'as yet unclassified' stamp: 'AC 5/3/2023 03:08:23'!
 runAllExamples
 
@@ -6169,7 +6177,7 @@ initializeGeneric
 	lt stopTracing: #at:put:  for: self.
 	lt stopTracing: #at:  for: self.! !
 
-!Dictionary class methodsFor: '*LiveTypingGenerics-initialization' stamp: 'AC 5/3/2023 01:07:16'!
+!Dictionary class methodsFor: '*LiveTypingGenerics-initialization' stamp: 'AC 7/19/2023 01:07:43'!
 initializeGeneric
 
 	| lt |
@@ -6183,9 +6191,9 @@ initializeGeneric
 
 		
 	"polymorphic parameters accessors"
-	lt addGetterFor: self on: #at: forParameter: 1.
-	lt addGetterFor: self on: #keyAt: forParameter: 2.
-	lt addGetterFor: self on: #keyAtValue: forParameter: 2.
+	lt addGetterFor: self on: #at: forParameter: 2.
+	lt addGetterFor: self on: #keyAt: forParameter: 1.
+	lt addGetterFor: self on: #keyAtValue: forParameter: 1.
 	
 	
 	"polymorphic parameters setters from arguments"
@@ -6720,17 +6728,19 @@ test06newTypeIsMetaclassSoleInstance
 	self assert: method returnTypes asSet equals: types
 ! !
 
-!LiveTypingSmalltalkCompleter methodsFor: '*LiveTypingGenerics' stamp: 'AC 4/4/2023 09:46:13'!
+!LiveTypingSmalltalkCompleter methodsFor: '*LiveTypingGenerics' stamp: 'AC 7/19/2023 00:57:41'!
 commonSupertypeOrSelectorsOf: aNodeUnderCursor in: aMethodNode  
 	
-	| methodToAnalyze types methodClass |
+	| methodToAnalyze types liveTypes methodClass |
 	
 	methodClass := aMethodNode encoder classEncoding.
 	methodToAnalyze := methodClass compiledMethodAt: aMethodNode selector ifAbsent: [ NotImplementedMethod class: methodClass selector: aMethodNode selector ].
 	
-	types := (aNodeUnderCursor basicTypesIn: methodToAnalyze addingIncompleteTypeInfoTo: Set new) asArray.
+	liveTypes := (aNodeUnderCursor typesIn: methodToAnalyze addingIncompleteTypeInfoTo: Set new).
+	types := OrderedCollection new. 
+	liveTypes classTypesDo: [:aClass | types add: aClass].
 	
-	^ VariableTypeInfo new initializeRawTypes: types.
+	^ VariableTypeInfo new initializeRawTypes: types asArray.
 	
 ! !
 
