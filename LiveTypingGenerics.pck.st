@@ -1,6 +1,6 @@
-'From Cuis 6.0 [latest update: #5706] on 19 July 2023 at 1:21:32 am'!
+'From Cuis 6.0 [latest update: #5706] on 20 July 2023 at 11:10:40 pm'!
 'Description This package adds to LiveTyping the capability of detecting polymorphic parameters in generic classes such as Array. '!
-!provides: 'LiveTypingGenerics' 0 7!
+!provides: 'LiveTypingGenerics' 0 8!
 !requires: 'LiveTyping' 1 97 nil!
 SystemOrganization addCategory: 'LiveTypingGenerics-Foundation'!
 SystemOrganization addCategory: 'LiveTypingGenerics-Core'!
@@ -1028,7 +1028,7 @@ test04onVarReturnItFlowsToReturnNode
 	
 	! !
 
-!FlowGraphCreationTest methodsFor: 'graph building' stamp: 'AC 4/17/2023 20:37:23'!
+!FlowGraphCreationTest methodsFor: 'graph building' stamp: 'AC 7/19/2023 19:34:56'!
 test05CanTrackAMethodThroughMessageSends
 
 	| graph method msgSendNode methodRef |
@@ -1044,15 +1044,15 @@ test05CanTrackAMethodThroughMessageSends
 	
 	msgSendNode := TfgMessageSendNode methodRef: methodRef.
 	
-	"graph also includes 3 instVars of this class, return value and the use of 'self' pseudo var"
-	self assert: 6 equals: (graph nodes size).
+	"graph also includes 3 instVars of this class, 3 instVars from TestCase, return value and the use of 'self' pseudo var"
+	self assert: 9 equals: (graph nodes size).
 	self assert: (graph nodes) includes: msgSendNode.
 	
 	
 	
 	! !
 
-!FlowGraphCreationTest methodsFor: 'graph building' stamp: 'AC 4/17/2023 20:38:01'!
+!FlowGraphCreationTest methodsFor: 'graph building' stamp: 'AC 7/19/2023 19:35:35'!
 test06TrackedMethodIsLinkedToVarsOnAssigment
 
 	| graph method msgSendNode methodRef |
@@ -1067,8 +1067,8 @@ test06TrackedMethodIsLinkedToVarsOnAssigment
 	
 	msgSendNode := TfgMessageSendNode methodRef: methodRef.
 	
-	"graph also includes 3 instVars of this class,  tmp var, msg, return value and the use of 'self' pseudo var"
-	self assert: 7 equals: (graph nodes size).
+	"graph also includes 3 instVars of this class, 3 instVars from TestCase, tmp var, msg, return value and the use of 'self' pseudo var"
+	self assert: 10 equals: (graph nodes size).
 	self assert: (graph nodes) includes: msgSendNode.
 	self assert: (
 		graph 
@@ -1080,7 +1080,7 @@ test06TrackedMethodIsLinkedToVarsOnAssigment
 	
 	! !
 
-!FlowGraphCreationTest methodsFor: 'graph building' stamp: 'AC 4/17/2023 20:38:32'!
+!FlowGraphCreationTest methodsFor: 'graph building' stamp: 'AC 7/19/2023 19:35:30'!
 test07CanTrackMultipleMethodThroughMessageSends
 
 	| graph method msgSendNode1 methodRef1 methodRef2 msgSendNode2 |
@@ -1100,8 +1100,8 @@ test07CanTrackMultipleMethodThroughMessageSends
 	msgSendNode1 := TfgMessageSendNode methodRef: methodRef1.
 	msgSendNode2 := TfgMessageSendNode methodRef: methodRef2.
 	
-	"graph also includes 3 instVars of this class,  return value and the use of 'self' pseudo var"
-	self assert: 7 equals: (graph nodes size).
+	"graph also includes 3 instVars of this class, 3 instVars from TestCase, return value and the use of 'self' pseudo var"
+	self assert: 10 equals: (graph nodes size).
 	self assert: (graph nodes) includes: msgSendNode1.
 	self assert: (graph nodes) includes: msgSendNode2.
 	
@@ -4371,7 +4371,7 @@ analyzeAssignment: anAssignmentNode
 !GAFlowGraphCreationDriver methodsFor: 'analysis' stamp: 'AC 4/14/2023 15:00:35'!
 analyzeMessageSend: aMessageNode ! !
 
-!GAFlowGraphCreationDriver methodsFor: 'analysis' stamp: 'AC 4/14/2023 16:13:24'!
+!GAFlowGraphCreationDriver methodsFor: 'analysis' stamp: 'AC 7/19/2023 18:43:32'!
 analyzeMethod: aMethodNode
 
 	aMethodNode arguments do: [:arg | 
@@ -4381,7 +4381,7 @@ analyzeMethod: aMethodNode
 		currentGraph addNode: (TfgVariableNode for: tmpName).
 	].
 
-	currentCompiledMethod methodClass instVarNames do: [ :anInstVarName | 
+	currentCompiledMethod methodClass allInstVarNames do: [ :anInstVarName | 
 		currentGraph addNode: (TfgVariableNode for: anInstVarName).
 	].
 
@@ -4618,7 +4618,7 @@ isInCallStack: aMethodNode
 	compiledMethod _ (aMethodNode methodClass) >> (aMethodNode selector).
 	^states anySatisfy: [:state | (state at: 'currentCompiledMethod') = compiledMethod].! !
 
-!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 4/24/2023 13:17:38'!
+!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 7/19/2023 18:45:28'!
 isVariableFlowingToCurrentVariable: aParseNode
 
 	| graph |
@@ -4650,11 +4650,11 @@ isVariableFlowingToCurrentVariable: aParseNode
 		methodRefs select: [:aMethodRef | types includes: aMethodRef actualClass] 
 			thenDo: [:aMethodRef | | messageSendNode |
 				messageSendNode := TfgMessageSendNode methodRef: aMethodRef.
-				currentTfgVariableNodes anySatisfy:[ :aTfgNode |
+				(currentTfgVariableNodes anySatisfy:[ :aTfgNode |
 					(graph isConnected: aTfgNode 
 						with: 	messageSendNode)
-						ifTrue: [^true].
-				].
+						.
+				]) ifTrue: [^true].
 		].	
 	].		
 
@@ -5597,7 +5597,7 @@ deleteOldLiveTypingMethods
 	].
 	! !
 
-!LiveTypingGenerics class methodsFor: 'private' stamp: 'AC 5/3/2023 03:39:13'!
+!LiveTypingGenerics class methodsFor: 'private' stamp: 'AC 7/19/2023 18:50:53'!
 initializeGenericClassesInfo
 
 	LiveTyping initializeGenerics.
@@ -5620,7 +5620,15 @@ initializeGenericClassesInfo
 		Dictionary.
 		IdentityDictionary.
 		OrderedDictionary.
-		WeakArray
+		
+		"the next classes only have very basic support"
+		WeakArray.
+		WeakKeyDictionary.
+		WeakIdentityKeyDictionary.
+		WeakRegistry.
+		WeakSet.
+		WeakIdentitySet.
+		WeakValueDictionary.
 	}
 	do: [:aType | 
 		aType initializeGeneric.	
@@ -6475,10 +6483,15 @@ basicTypesIn: aCompiledMethod addingIncompleteTypeInfoTo: incompleteTypeInfoReas
 	
 	^ Array with: key value class! !
 
-!LiteralVariableNode methodsFor: '*LiveTypingGenerics' stamp: 'AC 4/23/2023 01:21:49'!
+!LiteralVariableNode methodsFor: '*LiveTypingGenerics' stamp: 'AC 7/19/2023 02:08:26'!
 liveTypesIn: aCompiledMethod addingIncompleteTypeInfoTo: incompleteTypeInfoReasons  storingGenericsInfoIn: aStorage
 	
-	^FixedType for: key value class! !
+	^FixedType for: key value class
+	
+	
+	
+	
+! !
 
 !TempVariableNode methodsFor: '*LiveTypingGenerics' stamp: 'AC 4/3/2023 02:36:55'!
 basicTypesIn: aCompiledMethod addingIncompleteTypeInfoTo: incompleteTypeInfoReasons  
