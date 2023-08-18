@@ -1,6 +1,6 @@
-'From Cuis 6.0 [latest update: #5706] on 20 July 2023 at 11:10:40 pm'!
+'From Cuis 6.0 [latest update: #5706] on 18 August 2023 at 12:42:59 am'!
 'Description This package adds to LiveTyping the capability of detecting polymorphic parameters in generic classes such as Array. '!
-!provides: 'LiveTypingGenerics' 0 8!
+!provides: 'LiveTypingGenerics' 0 10!
 !requires: 'LiveTyping' 1 97 nil!
 SystemOrganization addCategory: 'LiveTypingGenerics-Foundation'!
 SystemOrganization addCategory: 'LiveTypingGenerics-Core'!
@@ -11,7 +11,7 @@ SystemOrganization addCategory: 'LiveTypingGenerics'!
 
 !classDefinition: #GAVisitor category: 'LiveTypingGenerics-Core'!
 ParseNodeVisitor subclass: #GAVisitor
-	instanceVariableNames: 'driver'
+	instanceVariableNames: 'driver nodes'
 	classVariableNames: ''
 	poolDictionaries: ''
 	category: 'LiveTypingGenerics-Core'!
@@ -201,7 +201,7 @@ GenericTypeConstructor class
 
 !classDefinition: #LiveTypesPrinter category: 'LiveTypingGenerics-Foundation'!
 Object subclass: #LiveTypesPrinter
-	instanceVariableNames: 'stream'
+	instanceVariableNames: 'stream canBeNil'
 	classVariableNames: ''
 	poolDictionaries: ''
 	category: 'LiveTypingGenerics-Foundation'!
@@ -321,7 +321,7 @@ GADriver class
 
 !classDefinition: #GAFlowGraphCreationDriver category: 'LiveTypingGenerics-Core'!
 GADriver subclass: #GAFlowGraphCreationDriver
-	instanceVariableNames: 'currentTfgVariableNodes currentCompiledMethod visitor states storage isMethodArg currentGraph'
+	instanceVariableNames: 'currentCompiledMethod visitor storage currentGraph'
 	classVariableNames: ''
 	poolDictionaries: ''
 	category: 'LiveTypingGenerics-Core'!
@@ -351,7 +351,7 @@ GAInstanceVarAnalysisDriver class
 
 !classDefinition: #GAMethodArgumentAnalysisDriver category: 'LiveTypingGenerics-Core'!
 GALocalVarAnalysisDriver subclass: #GAMethodArgumentAnalysisDriver
-	instanceVariableNames: 'i sureSenders originalCompiledMethod argumentIndex'
+	instanceVariableNames: 'originalCompiledMethod argumentIndex onLocalAnalysis collectedTypes'
 	classVariableNames: ''
 	poolDictionaries: ''
 	category: 'LiveTypingGenerics-Core'!
@@ -371,7 +371,7 @@ GAReturnValueAnalysisDriver class
 
 !classDefinition: #GANonConfigurableStorage category: 'LiveTypingGenerics-Core'!
 Object subclass: #GANonConfigurableStorage
-	instanceVariableNames: 'analysisFrames graphs generics tracedMethods getterMethods constructorMethods tracedMethodsParameters'
+	instanceVariableNames: 'analysisFrames graphs generics tracedMethods getterMethods constructorMethods tracedMethodsParameters analysisProgress analyzedMethodCount'
 	classVariableNames: ''
 	poolDictionaries: ''
 	category: 'LiveTypingGenerics-Core'!
@@ -387,6 +387,16 @@ GANonConfigurableStorage subclass: #GAConfigurableStorage
 	category: 'LiveTypingGenerics-Core'!
 !classDefinition: 'GAConfigurableStorage class' category: 'LiveTypingGenerics-Core'!
 GAConfigurableStorage class
+	instanceVariableNames: ''!
+
+!classDefinition: #ExampleObserver category: 'LiveTypingGenerics-Playground'!
+Object subclass: #ExampleObserver
+	instanceVariableNames: 'count'
+	classVariableNames: ''
+	poolDictionaries: ''
+	category: 'LiveTypingGenerics-Playground'!
+!classDefinition: 'ExampleObserver class' category: 'LiveTypingGenerics-Playground'!
+ExampleObserver class
 	instanceVariableNames: ''!
 
 !classDefinition: #GenericsExamples category: 'LiveTypingGenerics-Playground'!
@@ -550,26 +560,45 @@ driver: aGenericAnalysisDriver
 
 	driver _ aGenericAnalysisDriver.! !
 
-!GAVisitor methodsFor: 'visiting' stamp: 'AC 4/14/2023 16:29:39'!
+!GAVisitor methodsFor: 'visiting' stamp: 'AC 8/9/2023 14:53:21'!
 visit: aCompiledMethod
-	"self halt."
-	"self process: aCompiledMethod."
-	aCompiledMethod methodNode accept: self.! !
 
-!GAVisitor methodsFor: 'visiting' stamp: 'AC 4/24/2023 12:33:44'!
-visitAssignmentNode: anAssignmentNode
-	"N.B.  since assigment happens after the value is evaluated the value is visited first."
+	| currentNodes |
+
+	"this implementation aims to serve as an optimization, as the analysis could involve iterating through the AST of multiple methods. The idea is to not fill up the stack with the function calls made by the visitor pattern. The AST is iterated once and then the stack space is freed up before proceding - Adrian"
+
+	nodes add: OrderedCollection new.
+	aCompiledMethod methodNode accept: self.
 	
-	| destination origin graph |
+	currentNodes := nodes removeLast.
+	[currentNodes isEmpty] whileFalse: [ | node |
+		
+		node := currentNodes removeFirst.
+		
+		node isAssignmentNode ifTrue: [driver analyzeAssignment: node].
+		node isReturn ifTrue: [driver analyzeReturn: node].
+		node isMessageNode ifTrue: [driver analyzeMessageSend: node].
+		node isCascadeNode ifTrue: [
+			node messages do:[ :aMessageNode | driver analyzeMessageSend: aMessageNode]	
+		]
+		
+	].
+
+! !
+
+!GAVisitor methodsFor: 'visiting' stamp: 'AC 8/9/2023 01:46:20'!
+visitAssignmentNode: anAssignmentNode
 	
 	super visitAssignmentNode: anAssignmentNode.
-	driver analyzeAssignment: anAssignmentNode.! !
+	nodes last addLast: anAssignmentNode.
+	"driver analyzeAssignment: anAssignmentNode."! !
 
-!GAVisitor methodsFor: 'visiting' stamp: 'AC 4/24/2023 12:33:44'!
+!GAVisitor methodsFor: 'visiting' stamp: 'AC 8/9/2023 01:46:15'!
 visitMessageNode: aMessageNode
 
 	super visitMessageNode: aMessageNode.
-	driver analyzeMessageSend: aMessageNode.
+	nodes last addLast: aMessageNode.
+	"driver analyzeMessageSend: aMessageNode."
 
 	
 
@@ -578,11 +607,12 @@ visitMessageNode: aMessageNode
 	
 ! !
 
-!GAVisitor methodsFor: 'visiting' stamp: 'AC 4/24/2023 12:33:44'!
+!GAVisitor methodsFor: 'visiting' stamp: 'AC 8/9/2023 01:48:56'!
 visitMessageNodeInCascade: aMessageNode
 
 	super visitMessageNodeInCascade: aMessageNode.
-	driver analyzeMessageSend: aMessageNode.! !
+	nodes last addLast: aMessageNode.
+	"driver analyzeMessageSend: aMessageNode."! !
 
 !GAVisitor methodsFor: 'visiting' stamp: 'AC 4/24/2023 12:33:44'!
 visitMethodNode: aMethodNode
@@ -590,13 +620,19 @@ visitMethodNode: aMethodNode
 	driver analyzeMethod: aMethodNode.
 	super visitMethodNode: aMethodNode! !
 
-!GAVisitor methodsFor: 'visiting' stamp: 'AC 4/24/2023 12:33:44'!
+!GAVisitor methodsFor: 'visiting' stamp: 'AC 8/9/2023 01:46:03'!
 visitReturnNode: aReturnNode
 
 	super visitReturnNode: aReturnNode.
-	driver analyzeReturn: aReturnNode.
+	nodes last addLast: aReturnNode.
+	"driver analyzeReturn: aReturnNode."
 
 	! !
+
+!GAVisitor methodsFor: 'private' stamp: 'AC 8/9/2023 01:25:51'!
+initialize
+
+	nodes := OrderedCollection new.! !
 
 !LiveTypeTests methodsFor: 'as yet unclassified' stamp: 'alf & mds 2/5/2020 19:59:29'!
 test001SameType
@@ -1538,15 +1574,13 @@ inFirstPositionOf: aCollection put: anObject
 
 	aCollection at: 1 put: anObject.! !
 
-!InferenceTest methodsFor: 'auxiliary' stamp: 'AC 12/23/2022 02:51:39'!
-infiniteRecursionAdding: anObject to: aCollection 
-	
-	aCollection at:1 put: anObject.
-	self infiniteRecursionAdding: anObject to: aCollection.
-	! !
-
 !InferenceTest methodsFor: 'auxiliary' stamp: 'AC 4/20/2023 23:21:35'!
 methodAcceptingArrayAndAddingStrToIt: anArray
+
+	anArray at: 1 put: 'str'.! !
+
+!InferenceTest methodsFor: 'auxiliary' stamp: 'AC 8/4/2023 04:54:09'!
+methodAcceptingArrayAndAddingStrToItWithNoCallers: anArray
 
 	anArray at: 1 put: 'str'.! !
 
@@ -1581,6 +1615,12 @@ putStrIn: aCollection andIntegerIn: anotherCollection
 	self putIntegerInFirstPositionOf: anotherCollection.
 	
 	! !
+
+!InferenceTest methodsFor: 'auxiliary' stamp: 'AC 8/2/2023 02:29:28'!
+putStrInFirstPositionAndThenReturn: aCollection 
+	
+	aCollection at: 1 put: 'str'.
+	^aCollection.! !
 
 !InferenceTest methodsFor: 'auxiliary' stamp: 'AC 1/27/2023 02:10:03'!
 putStrInFirstPositionOf: aCollection 
@@ -1916,7 +1956,7 @@ test16LiteralCollectionFlowingToSuperMethod
 	
 	self assert: (GenericType for: Array withTypes: {String. SmallInteger}) equals: types.! !
 
-!InferenceTest methodsFor: 'typing cases' stamp: 'AC 4/23/2023 21:46:28'!
+!InferenceTest methodsFor: 'typing cases' stamp: 'AC 7/26/2023 21:02:05'!
 test17GenericTypeReturningParameterFromGetter
 
 	| tmp tmpAt1Node types |
@@ -1931,7 +1971,6 @@ test17GenericTypeReturningParameterFromGetter
 	
 	tmpAt1Node := self fromCurrentTestGetStatement: 3.
 
-	"types := analyzer returnValueFor: tmpAt1Node definedInMethod: (thisContext method)."
 	types := tmpAt1Node liveTypesIn: (thisContext method) addingIncompleteTypeInfoTo: (Set new) storingGenericsInfoIn: storage.
 	
 	self assert: (FixedType for: String) equals: types.
@@ -2508,6 +2547,82 @@ test42ArgumentCollectsInfoFromCallsAndCurrentMethodWithMultipleParameters
 	self assert: (GenericType for: Dictionary withMultiParamTypes: {{SmallInteger}.{String}}) equals: type.
 ! !
 
+!InferenceTest methodsFor: 'typing cases' stamp: 'AC 7/30/2023 21:35:17'!
+test43ReturnTypeOfSetterMethodIsLastArgument
+
+	| type1 node1 type2 node2 type3 node3 tmp1 tmp2 tmp3 |
+
+	tmp1 := Dictionary new.
+	tmp1 at: 1 put: 'str'.
+	
+	tmp2 := Array new: 1.
+	tmp2 at: 1 put: 1.0.
+	
+	tmp3 := OrderedCollection new.
+	tmp3 addAll: (Array with: 1).
+	
+	storage addGeneric: Dictionary withParameters: 2.
+	storage trace:#at:put:  for: Dictionary onArgs: {1->1. 2->2}.
+	storage addGeneric: Array withParameters: 1.
+	storage trace: #at:put: for: Array onArg: 2.
+	storage traceConstructor: (MethodReference class: Array class selector: #with:) for: Array  onArgs: #(1).
+	storage addGeneric: OrderedCollection withParameters: 1.
+	storage trace: #addAll: for: OrderedCollection onArgParameter: 1.
+
+	node1 := self fromCurrentTestGetStatement: 2.
+	type1 := node1 liveTypesIn: (thisContext method) addingIncompleteTypeInfoTo: Set new storingGenericsInfoIn: storage.
+	
+	node2 := self fromCurrentTestGetStatement: 4.
+	type2 := node2 liveTypesIn: (thisContext method) addingIncompleteTypeInfoTo: Set new storingGenericsInfoIn: storage.
+	
+	node3 := self fromCurrentTestGetStatement: 6.
+	type3 := node3 liveTypesIn: (thisContext method) addingIncompleteTypeInfoTo: Set new storingGenericsInfoIn: storage.
+				
+	self assert: (FixedType for: String) equals: type1.
+	self assert: (FixedType for: SmallFloat64) equals: type2.
+	self assert: (GenericType for: Array withTypes: {SmallInteger}) equals: type3.
+! !
+
+!InferenceTest methodsFor: 'typing cases' stamp: 'AC 8/2/2023 02:31:48'!
+test44CollectionIsDetectedWhenReturnedFromMethodAndAssignedToVariable
+
+	| type node tmp1 tmp2 |
+	
+	tmp1 := Array new: 10.
+	tmp2 := self putStrInFirstPositionAndThenReturn: tmp1.
+	tmp2 at: 2 put: 1.
+	
+	storage addGeneric: Array withParameters: 1.
+	storage trace: #at:put: for: Array onArg: 2.
+	
+	node := self fromCurrentTestGetStatement: 2.
+	type := node liveTypesIn: (thisContext method) addingIncompleteTypeInfoTo: Set new storingGenericsInfoIn: storage.
+	
+	self assert: (GenericType for: Array withTypes: {SmallInteger. String}) equals: type.
+! !
+
+!InferenceTest methodsFor: 'typing cases' stamp: 'AC 8/4/2023 05:12:02'!
+test45ArgumentCollectsInfoCurrentMethodWithNoCallers
+
+	| type node |
+	
+	"having no callers is simulated by exploiting the absense of type info in blocks"
+	[| tmp |
+		tmp := Array new: 10.
+		self methodAcceptingArrayAndAddingStrToItWithNoCallers: tmp
+	] value.
+	
+	storage addGeneric: Array.
+	storage trace:#at:put:  for: Array onArg: 2.
+
+	node := (self class >> #methodAcceptingArrayAndAddingStrToItWithNoCallers:) methodNode arguments at: 1.
+	type := node liveTypesIn: (self class >> #methodAcceptingArrayAndAddingStrToItWithNoCallers:) 
+				addingIncompleteTypeInfoTo: Set new 
+				storingGenericsInfoIn: storage.
+				
+	self assert: (GenericType for: Array withTypes: {String.}) equals: type.
+! !
+
 !TypeFlowGraphTest methodsFor: 'testing' stamp: 'AC 1/18/2023 21:04:12'!
 test01IsCreatedEmpty
 
@@ -3044,7 +3159,7 @@ test003GenericSingleValue
 	self assert: {TypeNode for: (FixedType for: Integer)} equals: typeTree bound.
 	self assert: Set new equals: typeTree generics! !
 
-!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'alf and mtqp 2/17/2020 19:50:14'!
+!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'AC 8/2/2023 01:59:15'!
 test004MultipleFixed
 	| typeTree intType floatType intNode floatNode |
 
@@ -3056,9 +3171,9 @@ test004MultipleFixed
 
 	self assert: (FixedType for: Number) equals: typeTree type.
 	self assert: nil equals: typeTree bound.
-	self assert: (Set with: intNode with: floatNode) equals: typeTree generics! !
+	self assert: {intNode. floatNode} equals: typeTree generics! !
 
-!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'AC 5/1/2023 20:04:02'!
+!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'AC 8/2/2023 01:59:51'!
 test005GenericMultipleValues
 	| typeTree intType floatType intNode floatNode |
 
@@ -3071,10 +3186,10 @@ test005GenericMultipleValues
 
 	self assert: (FixedType for: LinkedList) equals: typeTree type.
 	self assert: {TypeNode for: (Set with: intType with: floatType)} equals: typeTree bound.
-	self assert: (Set with: intNode with: floatNode) equals: (typeTree bound at: 1) generics.
+	self assert: {intNode. floatNode} equals: (typeTree bound at: 1) generics.
 	self assert: Set new equals: typeTree generics.! !
 
-!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'alf and mtqp 2/18/2020 20:50:44'!
+!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'AC 8/2/2023 02:00:06'!
 test006MultipleFixedWithNoCommonSupertype
 	| typeTree intType stringType intNode stringNode |
 
@@ -3086,9 +3201,9 @@ test006MultipleFixedWithNoCommonSupertype
 
 	self assert: (FixedType for: Object) equals: typeTree type.
 	self assert: nil equals: typeTree bound.
-	self assert: (Set with: intNode with: stringNode) equals: typeTree generics! !
+	self assert: {intNode. stringNode} equals: typeTree generics! !
 
-!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'AC 5/1/2023 20:04:49'!
+!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'AC 8/2/2023 02:00:28'!
 test007MultipleGenerics
 	| typeTree genericType otherGenericType genericNode otherGenericNode floatType intType floatNode intNode |
 
@@ -3104,8 +3219,8 @@ test007MultipleGenerics
 
 	self assert: (FixedType for: SequenceableCollection) equals: typeTree type.
 	self assert: {TypeNode for: (Set with: intType with: floatType)} equals: typeTree bound.
-	self assert: (Set with: intNode with: floatNode) equals: (typeTree bound at: 1) generics.
-	self assert: (Set with: genericNode with: otherGenericNode) equals: typeTree generics! !
+	self assert: {intNode. floatNode} equals: (typeTree bound at: 1) generics.
+	self assert: {genericNode. otherGenericNode} equals: typeTree generics! !
 
 !TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'AC 5/1/2023 20:05:49'!
 test008GenericEmptyValue
@@ -3119,7 +3234,7 @@ test008GenericEmptyValue
 	self assert: {TypeNode for: (Set with: emptyType)} equals: typeTree bound.
 	self assert: Set new equals: typeTree generics.! !
 
-!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'AC 5/1/2023 20:06:26'!
+!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'AC 8/2/2023 02:00:53'!
 test009MultipleGenericsEmptyValue
 	| typeTree genericType otherGenericType genericNode otherGenericNode floatType emptyType emptyNode floatNode |
 
@@ -3135,10 +3250,10 @@ test009MultipleGenericsEmptyValue
 
 	self assert: (FixedType for: SequenceableCollection) equals: typeTree type.
 	self assert: {TypeNode for: (Set with: emptyType with: floatType)} equals: typeTree bound.
-	self assert: (Set with: emptyNode with: floatNode) equals: (typeTree bound at: 1) generics.
-	self assert: (Set with: genericNode with: otherGenericNode) equals: typeTree generics! !
+	self assert: {emptyNode. floatNode} equals: (typeTree bound at: 1) generics.
+	self assert: {genericNode. otherGenericNode} equals: typeTree generics! !
 
-!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'alf and mtqp 2/18/2020 21:52:19'!
+!TypeNodeTests methodsFor: 'as yet unclassified' stamp: 'AC 8/2/2023 02:01:08'!
 test010EmptyAndFixed
 	| typeTree intType emptyType intNode emptyNode |
 
@@ -3150,7 +3265,7 @@ test010EmptyAndFixed
 
 	self assert: (FixedType for: Object) equals: typeTree type.
 	self assert: nil equals: typeTree bound.
-	self assert: (Set with: intNode with: emptyNode) equals: typeTree generics! !
+	self assert: {intNode. emptyNode} equals: typeTree generics! !
 
 !LiveType methodsFor: 'as yet unclassified' stamp: 'alf and mtqp 2/16/2020 16:54:23'!
 accept: visitor 
@@ -3177,13 +3292,6 @@ sanitize: types
 supertypeWith: types 
 	self subclassResponsibility.! !
 
-!LiveType methodsFor: 'as yet unclassified' stamp: 'AC 3/27/2023 00:31:40'!
-typeName
-
-	^String streamContents: [:stream | 
-		self accept: (LiveTypesPrinter on: stream)
-	].! !
-
 !LiveType methodsFor: 'as yet unclassified' stamp: 'alf and mtqp 2/16/2020 19:05:11'!
 unifiesWith: anotherType
 	^ false.! !
@@ -3201,6 +3309,14 @@ asArray
 asTypeFor: aReceiverType
 
 	^self! !
+
+!LiveType methodsFor: 'compatibility' stamp: 'AC 8/7/2023 14:15:28'!
+typeName
+
+	self subclassResponsibility 
+	"^String streamContents: [:stream | 
+		self accept: (LiveTypesPrinter on: stream)
+	]."! !
 
 !LiveType methodsFor: 'enumerating' stamp: 'AC 4/10/2023 01:58:07'!
 classTypesDo: aBlock
@@ -3235,6 +3351,11 @@ asArray
 !ClassLiveType methodsFor: 'as yet unclassified' stamp: 'alf and mtqp 2/16/2020 13:48:21'!
 liveClass
 	^ class! !
+
+!ClassLiveType methodsFor: 'as yet unclassified' stamp: 'AC 8/7/2023 14:18:37'!
+typeName
+
+	^self liveClass name.! !
 
 !ClassLiveType methodsFor: 'enumerating' stamp: 'AC 4/10/2023 01:58:07'!
 classTypesDo: aBlock
@@ -3487,6 +3608,11 @@ supertypeWith: types
 
 	^ self.! !
 
+!EmptyType methodsFor: 'as yet unclassified' stamp: 'AC 8/7/2023 16:30:20'!
+typeName
+
+	^'?'! !
+
 !EmptyType methodsFor: 'enumerating' stamp: 'AC 4/10/2023 01:58:07'!
 classTypesDo: aBlock
 
@@ -3574,6 +3700,13 @@ supertypeWith: liveTypes
 	types addAll: typesToProcess.
 
 	^ self.! !
+
+!UnionType methodsFor: 'as yet unclassified' stamp: 'AC 8/7/2023 16:32:09'!
+typeName
+
+	^String streamContents: [:stream |
+		self classTypesDo: [:ct | stream nextPutAll: ct typeName, ' ']
+	].! !
 
 !UnionType methodsFor: 'as yet unclassified' stamp: 'alf and mtqp 2/16/2020 13:45:30'!
 types
@@ -3813,9 +3946,12 @@ print: liveTypes upTo: aNumberOfTypes withDelimiter: printDelimiter
 	
 ! !
 
-!LiveTypesPrinter methodsFor: 'as yet unclassified' stamp: 'AC 6/19/2023 21:02:50'!
+!LiveTypesPrinter methodsFor: 'as yet unclassified' stamp: 'AC 8/16/2023 02:11:12'!
 print: typesTreeArray withDelimiter: printDelimiter
-	| treeBound treeGenerics |
+	| treeBound treeGenerics canBeNilTmp |
+	
+	canBeNilTmp := canBeNil.
+	canBeNil := false.
 	
 	printDelimiter ifTrue: [
 		stream nextPut: $<.
@@ -3838,19 +3974,30 @@ print: typesTreeArray withDelimiter: printDelimiter
 		(i = typesTreeArray size) ifFalse: [stream nextPutAll: ', '].
 	].
 	
+	canBeNil ifTrue: [
+		stream nextPutAll: 'can be nil !!' 
+	].
+	canBeNil := canBeNilTmp.
+	
 	printDelimiter ifTrue: [
 		stream nextPut: $>.
-	].! !
+	].
+	stream newLine! !
 
 !LiveTypesPrinter methodsFor: 'as yet unclassified' stamp: 'alf and mtqp 2/16/2020 17:10:02'!
 visitEmptyType: anEmptyType
 	stream nextPut: $?! !
 
-!LiveTypesPrinter methodsFor: 'as yet unclassified' stamp: 'alf and mtqp 2/18/2020 22:56:43'!
+!LiveTypesPrinter methodsFor: 'as yet unclassified' stamp: 'AC 8/16/2023 01:59:50'!
 visitFixedType: aFixedType
 	|class|
 	"TODO: Consider instead actually printing UnionTypes as any instead of forcing UnionType supertypes into Object at the node level. Maybe even consider wheter the supertype of all mixed types should be a Union".
+	
 	class := aFixedType liveClass.
+	(class = UndefinedObject) ifTrue: [
+		canBeNil := true.
+		^self.
+	].
 	(class = Object) 
 		ifTrue: [
 			stream nextPutAll: 'any'
@@ -3967,17 +4114,16 @@ commonLowestTypeIn: commonSupertypes
 	
 	^ commonSupertype! !
 
-!SupertypeDetective methodsFor: 'as yet unclassified' stamp: 'alf & mds 2/2/2020 19:04:07'!
+!SupertypeDetective methodsFor: 'as yet unclassified' stamp: 'AC 8/18/2023 00:37:14'!
 commonSupertypeIfNoTypes: aBlock
 
 	"TODO remove this!! ALF & MDS"
 	| types commonSupertypes commonSupertype |
-	
-	types := searchingTypes.
-	types := types reject: [ :aType | aType = UndefinedObject ].
-	types isEmpty ifTrue: [ ^aBlock value ].
-	types size = 1 ifTrue: [ ^types anyOne ].
-	
+
+	searchingTypes isEmpty ifTrue: [ ^aBlock value ].
+	searchingTypes size = 1 ifTrue: [ ^searchingTypes anyOne ].
+	types := searchingTypes reject: [ :aType | aType = UndefinedObject ].
+
 	"I have to convert types to Array becuase inst var types can be a Set - Hernan"
 	commonSupertypes := self allSupertypesOf: types.
 	commonSupertype := self commonLowestTypeIn: commonSupertypes.
@@ -4267,7 +4413,7 @@ initializeWith: aTypeSet
 printOn: aStream
 	aStream nextPutAll: 'TypeNode ', type asString , '<', bound asString, '> # ' , generics asString ! !
 
-!TypeNode methodsFor: 'as yet unclassified' stamp: 'AC 4/9/2023 21:41:45'!
+!TypeNode methodsFor: 'as yet unclassified' stamp: 'AC 7/23/2023 13:34:38'!
 sanitize: types
 	| sanitizedTypes |
 	
@@ -4279,7 +4425,7 @@ sanitize: types
 			sanitizedTypes := Set with: types.
 		].
 	
-	^ sanitizedTypes! !
+	^ {sanitizedTypes} flatten! !
 
 !TypeNode methodsFor: 'as yet unclassified' stamp: 'alf and mtqp 2/17/2020 19:19:23'!
 type
@@ -4330,7 +4476,7 @@ visitor: aGAVisitor
 
 	visitor := aGAVisitor.! !
 
-!GAFlowGraphCreationDriver methodsFor: 'analysis' stamp: 'AC 4/14/2023 15:30:02'!
+!GAFlowGraphCreationDriver methodsFor: 'analysis' stamp: 'AC 8/4/2023 03:46:24'!
 analyzeAssignment: anAssignmentNode
 
 	| value destination origin graph |
@@ -4344,11 +4490,11 @@ analyzeAssignment: anAssignmentNode
 	value isAssignmentNode
 		ifTrue: [origin := TfgVariableNode for: value variable name].
 
-	value isMessageNode ifTrue: [
-		
+	value isMessageNode ifTrue: [ | classTypes |
+		classTypes := (value receiver basicTypesIn: currentCompiledMethod addingIncompleteTypeInfoTo: (Set new)).
 		storage trackedMethodRefs do: [ :aTrackedMethodRef | 
 			(value selectorSymbol = aTrackedMethodRef selector
-			and: [(value receiver basicTypesIn: currentCompiledMethod addingIncompleteTypeInfoTo: (Set new)) includes: aTrackedMethodRef actualClass ])
+			and: [classTypes includes: aTrackedMethodRef actualClass ])
 				ifTrue: [
 				
 				origin := TfgMessageSendNode methodRef: aTrackedMethodRef.
@@ -4447,14 +4593,10 @@ for: aCompiledMethod visitor: aGAVisitor  storage: aGAStorage callerDriver: aGAD
 
 	^self new initializeFor: aCompiledMethod visitor: aGAVisitor storage: aGAStorage callerDriver: aGADriver.! !
 
-!GALocalVarAnalysisDriver methodsFor: 'initialization' stamp: 'AC 4/24/2023 13:12:45'!
+!GALocalVarAnalysisDriver methodsFor: 'initialization' stamp: 'AC 7/30/2023 20:10:41'!
 initializeFor: aTfgVariableNode in: aCompiledMethod forTypes: types storage: anAnalysisStorage   
 
 	visitor := GAVisitor new.
-	
-	"currentTfgVariableNodes := {aTfgVariableNode}.
-	currentCompiledMethod := aCompiledMethod.
-	tracedParseNodes := Set new."
 	
 	self initializeStateFor: aCompiledMethod 
 		tracingVariables: {aTfgVariableNode}
@@ -4468,26 +4610,32 @@ initializeFor: aTfgVariableNode in: aCompiledMethod forTypes: types storage: anA
 
 	! !
 
-!GALocalVarAnalysisDriver methodsFor: 'analysis' stamp: 'AC 5/2/2023 14:14:12'!
+!GALocalVarAnalysisDriver methodsFor: 'analysis' stamp: 'AC 8/2/2023 02:26:35'!
 analyzeAssignment: anAssignmentNode
 
 	| type |
 	
-	(currentTfgVariableNodes includes: (TfgVariableNode for: anAssignmentNode variable name)) ifFalse: [^self].
+	(currentTfgVariableNodes includes: (TfgVariableNode for: anAssignmentNode variable name)) ifFalse: [
+		(self isVariableFlowingToCurrentVariable: anAssignmentNode value) ifTrue: [
+			currentTfgVariableNodes := currentTfgVariableNodes grownTo: (currentTfgVariableNodes size + 1).
+			currentTfgVariableNodes at: (currentTfgVariableNodes size) put: (TfgVariableNode for: anAssignmentNode variable name).
+		].
+		^self
+	].
 	
 	type := anAssignmentNode value liveTypesIn: currentCompiledMethod 
 								addingIncompleteTypeInfoTo: Set new 
 								storingGenericsInfoIn: storage.
 	storage mergeTypes: type.! !
 
-!GALocalVarAnalysisDriver methodsFor: 'analysis' stamp: 'AC 4/24/2023 13:26:20'!
+!GALocalVarAnalysisDriver methodsFor: 'analysis' stamp: 'AC 7/23/2023 23:52:27'!
 analyzeMessageSend: aMessageNode 
 	
 	
 	| isVariableUnderAnalisys receiver argIndex arguments argIndexSet implementors |
 	
 	receiver := aMessageNode receiverOrCascadeReceiver.
-	"self halt."
+
 	"msg send to variable under analysis"
 	isVariableUnderAnalisys := self isVariableFlowingToCurrentVariable: receiver.
 	isVariableUnderAnalisys 
@@ -4512,21 +4660,10 @@ analyzeMessageSend: aMessageNode
 	].
 		! !
 
-!GALocalVarAnalysisDriver methodsFor: 'analysis' stamp: 'AC 5/2/2023 14:14:02'!
-analyzeReturn: aReturnNode
-
-	(currentTfgVariableNodes includes: TfgReturnValue new) ifTrue: [ | type |
-		type := aReturnNode expr liveTypesIn: currentCompiledMethod 
-								addingIncompleteTypeInfoTo: Set new 
-								storingGenericsInfoIn: storage.
-								
-		storage mergeTypes: type.
-	].! !
-
-!GALocalVarAnalysisDriver methodsFor: 'analysis' stamp: 'AC 4/18/2023 23:17:40'!
+!GALocalVarAnalysisDriver methodsFor: 'analysis' stamp: 'AC 8/9/2023 13:38:13'!
 inferredTypes
 
-	^storage inferredTypes! !
+	^storage inferredTypes.! !
 
 !GALocalVarAnalysisDriver methodsFor: 'analysis' stamp: 'AC 4/19/2023 02:04:14'!
 runAnalysis
@@ -4554,10 +4691,17 @@ addTypesFrom: aMessageNode sentIn: aCompiledMethod
 	]. 
 	! !
 
-!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 4/24/2023 13:08:58'!
+!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 8/15/2023 21:20:41'!
 analyzeMethodCall: aCompiledMethod onArgs: anIndexSet from: aMessageNode
 
 	| node variables implementorGraph |
+
+	storage hasAvailableResourcesForMethodAnalysis ifFalse: [
+		"no more resources available, do nothing"
+		^self.	
+	].
+	storage addOneToAnalyzedMethodsCount.
+
 
 	node := aCompiledMethod methodNode.
 	(self isInCallStack: node) ifTrue: [^self]. "recursive function, just don't get stuck"
@@ -4618,7 +4762,7 @@ isInCallStack: aMethodNode
 	compiledMethod _ (aMethodNode methodClass) >> (aMethodNode selector).
 	^states anySatisfy: [:state | (state at: 'currentCompiledMethod') = compiledMethod].! !
 
-!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 7/19/2023 18:45:28'!
+!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 8/3/2023 13:31:45'!
 isVariableFlowingToCurrentVariable: aParseNode
 
 	| graph |
@@ -4629,36 +4773,21 @@ isVariableFlowingToCurrentVariable: aParseNode
 
 	graph := storage graphFor: currentCompiledMethod.
 
-	aParseNode isVariableNode ifTrue: [
+	aParseNode isVariableNode ifTrue: [ | currentParseNodeVar |
+		currentParseNodeVar := TfgVariableNode for: aParseNode name.
 		^currentTfgVariableNodes anySatisfy: [:aTfgVariableNode | 
 			(aParseNode name = aTfgVariableNode name)
 				or: [graph isConnected: aTfgVariableNode 
-					with: (TfgVariableNode for: aParseNode name)]
+					with: currentParseNodeVar ]
 		].
 	]. 
 
-	(aParseNode isMessageNode and: [storage trackedMethodRefs isEmpty not] )ifTrue: [ | methodRefs types |
-
-		methodRefs := storage trackedMethodRefs select: [:methodRef |
-			aParseNode selectorSymbol = methodRef selector.
-		].
-	
-		types := aParseNode receiver
-					basicTypesIn: currentCompiledMethod 
-					addingIncompleteTypeInfoTo: 	(Set new).
-
-		methodRefs select: [:aMethodRef | types includes: aMethodRef actualClass] 
-			thenDo: [:aMethodRef | | messageSendNode |
-				messageSendNode := TfgMessageSendNode methodRef: aMethodRef.
-				(currentTfgVariableNodes anySatisfy:[ :aTfgNode |
-					(graph isConnected: aTfgNode 
-						with: 	messageSendNode)
-						.
-				]) ifTrue: [^true].
-		].	
-	].		
-
 	^false.! !
+
+!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 8/9/2023 13:56:10'!
+readInferredTypes
+
+	^storage readInferredTypes! !
 
 !GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 4/24/2023 13:16:27'!
 restorePreviousState
@@ -4670,13 +4799,31 @@ restorePreviousState
 		tracingVariables: (previousState at: 'currentVariableName')
 		tracingParseNodes: (previousState at: 'tracedParseNodes').! !
 
-!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 4/19/2023 00:02:56'!
+!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 8/9/2023 13:55:54'!
 runAnalysisWithoutInitializationCheck
+	
+	| inferredTypes |
+	
+	(currentTfgVariableNodes anySatisfy: [:aTfgNode | 
+		(storage isUnderAnalysis: aTfgNode on: currentCompiledMethod)
+			or: [storage isComputed: aTfgNode on: currentCompiledMethod].
+	]) ifTrue: [^self.].
 	
 	graphBuildingDriver compiledMethod: currentCompiledMethod.
 	graphBuildingDriver runAnalysis.
+	
 	visitor driver: self.
-	visitor visit: currentCompiledMethod.! !
+	
+	currentTfgVariableNodes do: [:aTfgNode | 
+		storage markUnderAnalisys: aTfgNode on: currentCompiledMethod.
+	].
+	
+	visitor visit: currentCompiledMethod.
+	
+	inferredTypes := self readInferredTypes. 
+	currentTfgVariableNodes do: [:aTfgNode | 
+		storage markComputed: aTfgNode on: currentCompiledMethod withType: inferredTypes.
+	].! !
 
 !GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 4/24/2023 13:14:18'!
 saveStateForMethod: aCompiledMethod variables: aTfgVariableNodeCollection
@@ -4755,11 +4902,53 @@ calculateActualSendersOf: aMethodCollection
 	
 	^(MultiImplementorsActualMessageSendsCollector for: aMethodCollection) value; actualSenders! !
 
-!GAInstanceVarAnalysisDriver methodsFor: 'private' stamp: 'AC 4/19/2023 01:25:31'!
+!GAInstanceVarAnalysisDriver methodsFor: 'private' stamp: 'AC 8/6/2023 22:16:58'!
+isVariableFlowingToCurrentVariable: aParseNode
+
+	| graph |
+	
+	aParseNode ifNil: [^false].
+	
+	(super isVariableFlowingToCurrentVariable: aParseNode) ifTrue: [^true].
+
+	graph := storage graphFor: currentCompiledMethod.	
+	(aParseNode isMessageNode and: [storage trackedMethodRefs isEmpty not] )ifTrue: [ | methodRefs types |
+
+		methodRefs := storage trackedMethodRefs select: [:methodRef |
+			aParseNode selectorSymbol = methodRef selector.
+		].
+	
+		types := aParseNode receiver
+					basicTypesIn: currentCompiledMethod 
+					addingIncompleteTypeInfoTo: 	(Set new).
+
+		methodRefs select: [:aMethodRef | types includes: aMethodRef actualClass] 
+			thenDo: [:aMethodRef | | messageSendNode |
+				messageSendNode := TfgMessageSendNode methodRef: aMethodRef.
+				(currentTfgVariableNodes anySatisfy:[ :aTfgNode |
+					(graph isConnected: aTfgNode 
+						with: 	messageSendNode)
+						.
+				]) ifTrue: [^true].
+		].	
+	].		
+
+	^false.! !
+
+!GAInstanceVarAnalysisDriver methodsFor: 'private' stamp: 'AC 8/9/2023 13:56:36'!
 runAnalysisWithoutInitializationCheck
 
-	| getterMethods getterMethodsRefs |
+	| getterMethods getterMethodsRefs inferredTypes |
 	
+	(currentTfgVariableNodes anySatisfy: [:aTfgNode | 
+		(storage isUnderAnalysis: aTfgNode on: currentCompiledMethod)
+			or: [storage isComputed: aTfgNode on: currentCompiledMethod].
+	]) ifTrue: [^self.].
+
+	currentTfgVariableNodes do: [:aTfgNode | 
+		storage markUnderAnalisys: aTfgNode on: currentCompiledMethod.
+	].
+
 	getterMethods := Set new.
 	getterMethodsRefs := Set new.
 	
@@ -4767,7 +4956,12 @@ runAnalysisWithoutInitializationCheck
 		andTheirRefsIn: getterMethodsRefs.
 		
 	self analyzeRemoteAccessesOnSendersOf: getterMethods
-		trackingFrom: getterMethodsRefs.! !
+		trackingFrom: getterMethodsRefs.
+		
+	inferredTypes := self readInferredTypes. 
+	currentTfgVariableNodes do: [:aTfgNode | 
+		storage markComputed: aTfgNode on: currentCompiledMethod withType: inferredTypes.
+	].! !
 
 !GAInstanceVarAnalysisDriver methodsFor: 'private' stamp: 'AC 4/18/2023 23:50:49'!
 runLocalAnalysisForNode: aTfgVariableNode in: aCompiledMethod
@@ -4793,51 +4987,61 @@ forVarNode: aTfgVariableNode in: aClass forTypes: types storage: storage
 
 	^self new initializeFor: aTfgVariableNode in: aClass forTypes: types storage: storage ! !
 
-!GAMethodArgumentAnalysisDriver methodsFor: 'initialization' stamp: 'AC 4/19/2023 02:06:12'!
+!GAMethodArgumentAnalysisDriver methodsFor: 'initialization' stamp: 'AC 8/4/2023 06:06:35'!
 initializeFor: aTfgVariableNode in: aCompiledMethod forTypes: types storage: anAnalysisStorage   
 
 	originalCompiledMethod := aCompiledMethod.
+	collectedTypes := IdentityDictionary new.
 	super initializeFor: aTfgVariableNode in: aCompiledMethod forTypes: types storage: anAnalysisStorage.! !
 
-!GAMethodArgumentAnalysisDriver methodsFor: 'initialization' stamp: 'AC 4/20/2023 00:11:41'!
+!GAMethodArgumentAnalysisDriver methodsFor: 'initialization' stamp: 'AC 8/4/2023 06:05:57'!
 initializeForVarNode: aTfgVariableNode withIndex: index in: aCompiledMethod forTypes: types storage: anAnalysisStorage.
 
-	originalCompiledMethod := aCompiledMethod.
 	argumentIndex := index.
-	super initializeFor: aTfgVariableNode in: aCompiledMethod forTypes: types storage: anAnalysisStorage.! !
+	self initializeFor: aTfgVariableNode 
+		in: aCompiledMethod 
+		forTypes: types 
+		storage: anAnalysisStorage.! !
 
-!GAMethodArgumentAnalysisDriver methodsFor: 'private' stamp: 'AC 4/19/2023 02:16:46'!
-implementorsForMessageNode: aMessageNode
-
-	| implementors |
-	implementors := super implementorsForMessageNode: aMessageNode.
-	^implementors reject: [:anImplementor | anImplementor = originalCompiledMethod ].! !
-
-!GAMethodArgumentAnalysisDriver methodsFor: 'private' stamp: 'AC 4/20/2023 01:15:09'!
+!GAMethodArgumentAnalysisDriver methodsFor: 'private' stamp: 'AC 8/15/2023 22:23:32'!
 runAnalysisWithoutInitializationCheck
-
+	
+	| sureSenders |
+	
+	onLocalAnalysis := true.
+	super runAnalysisWithoutInitializationCheck.
+	onLocalAnalysis := false.
+	
 	sureSenders := (Smalltalk allActualSendersOn: currentCompiledMethod) first.
 	visitor driver: self.
 	sureSenders do: [:aSureSender |
-		currentCompiledMethod := aSureSender compiledMethod.
-		visitor visit: currentCompiledMethod.
+		storage hasAvailableResourcesForMethodAnalysis ifTrue: [
+			storage addOneToAnalyzedMethodsCount.
+			currentCompiledMethod := aSureSender compiledMethod.
+			visitor visit: currentCompiledMethod.
+		].
 	].! !
 
-!GAMethodArgumentAnalysisDriver methodsFor: 'analysis' stamp: 'AC 4/20/2023 01:15:43'!
+!GAMethodArgumentAnalysisDriver methodsFor: 'analysis' stamp: 'AC 8/4/2023 06:08:28'!
 analyzeMessageSend: aMessageNode 
 
 	| receiver receiverTypes |
+	
+	onLocalAnalysis ifTrue:[^super analyzeMessageSend: aMessageNode].
+	
 	(aMessageNode selectorSymbol  = originalCompiledMethod selector) ifFalse: [^self].
 
 	receiver := aMessageNode receiverOrCascadeReceiver.
 	receiverTypes := receiver basicTypesIn: currentCompiledMethod addingIncompleteTypeInfoTo: Set new. 
 	
-	(receiverTypes includes: originalCompiledMethod methodClass) ifTrue: [ | types |
-		types := (aMessageNode arguments at: argumentIndex ) 
-					liveTypesIn: currentCompiledMethod 
-					addingIncompleteTypeInfoTo: Set new 
-					storingGenericsInfoIn: storage.
-					
+	(receiverTypes includes: originalCompiledMethod methodClass) ifTrue: [ | types node |
+		node := aMessageNode arguments at: argumentIndex.
+		types := collectedTypes 
+					at:  node
+					ifAbsentPut: [node liveTypesIn: currentCompiledMethod 
+									addingIncompleteTypeInfoTo: Set new 
+									storingGenericsInfoIn: storage].
+		
 		storage mergeTypes: types.
 	].! !
 
@@ -4851,17 +5055,33 @@ forVarNode: aTfgVarNode withIndex: index in: aCompiledMethod forTypes: types sto
 
 	^self new initializeForVarNode: aTfgVarNode withIndex: index in: aCompiledMethod forTypes: types storage: aStorage.! !
 
+!GAReturnValueAnalysisDriver methodsFor: 'analysis' stamp: 'AC 8/3/2023 23:58:00'!
+analyzeReturn: aReturnNode
+
+	(currentTfgVariableNodes includes: `TfgReturnValue new`) ifTrue: [ | type |
+		type := aReturnNode expr liveTypesIn: currentCompiledMethod 
+								addingIncompleteTypeInfoTo: Set new 
+								storingGenericsInfoIn: storage.
+								
+		storage mergeTypes: type.
+	].! !
+
 !GAReturnValueAnalysisDriver methodsFor: 'analysis' stamp: 'AC 4/18/2023 23:25:17'!
 inferredTypes
 
 	^storage inferredTypesAsSet! !
 
-!GAReturnValueAnalysisDriver class methodsFor: 'instance creation' stamp: 'AC 4/18/2023 23:22:54'!
+!GAReturnValueAnalysisDriver methodsFor: 'private' stamp: 'AC 8/9/2023 13:57:11'!
+readInferredTypes
+
+	^storage readInferredTypesAsSet.! !
+
+!GAReturnValueAnalysisDriver class methodsFor: 'instance creation' stamp: 'AC 8/4/2023 02:46:55'!
 in: aCompiledMethod forTypes: types storage: storage
 
-	^self forVarNode: (TfgReturnValue new) in: aCompiledMethod forTypes: types  storage: storage ! !
+	^self forVarNode: (`TfgReturnValue new`) in: aCompiledMethod forTypes: types  storage: storage ! !
 
-!GANonConfigurableStorage methodsFor: 'initialization-private' stamp: 'AC 5/3/2023 00:53:10'!
+!GANonConfigurableStorage methodsFor: 'initialization-private' stamp: 'AC 8/15/2023 21:17:19'!
 initializeGenerics: aGenerics tracedMethods: aTracedMethods tracedMethodsParameters: aTracedMethodsParameters getterMethods: aGetterMethods constructorMethods: aConstructorMethods
 
 	"common to all analyses"
@@ -4871,9 +5091,23 @@ initializeGenerics: aGenerics tracedMethods: aTracedMethods tracedMethodsParamet
 	getterMethods := aGetterMethods.
 	constructorMethods := aConstructorMethods.
 	
-	"common to an analysis and all its sub-analises"
+	"common to an analysis and all its subanalises"
 	graphs := Dictionary new. 
-	analysisFrames := OrderedCollection new.! !
+	analysisFrames := OrderedCollection new.
+	analysisProgress := Dictionary new.
+	
+	"common to an analysis and all its subanalises - resource use limitation"
+	analyzedMethodCount := 0.! !
+
+!GANonConfigurableStorage methodsFor: 'resource-utilization' stamp: 'AC 8/15/2023 21:15:44'!
+addOneToAnalyzedMethodsCount
+
+	analyzedMethodCount := analyzedMethodCount + 1.! !
+
+!GANonConfigurableStorage methodsFor: 'resource-utilization' stamp: 'AC 8/15/2023 22:31:29'!
+hasAvailableResourcesForMethodAnalysis
+
+	^analyzedMethodCount <= 20.! !
 
 !GANonConfigurableStorage methodsFor: 'analysis' stamp: 'AC 5/1/2023 23:52:23'!
 addType: aLiveType to: anIndex for: aClassType
@@ -4902,39 +5136,25 @@ addTypes: aLiveTypeCollection to: anIndex for: aClassType
 	].
 	! !
 
-!GANonConfigurableStorage methodsFor: 'analysis' stamp: 'AC 4/28/2023 02:32:58'!
+!GANonConfigurableStorage methodsFor: 'analysis' stamp: 'AC 8/9/2023 13:35:46'!
 inferredTypes
 	
-	| finalTypes index currentTypesToParameters |
+	| finalTypes |
 	
-	currentTypesToParameters := self typesToParameters.
-	finalTypes := Array new: currentTypesToParameters size.
-	index := 1.
-	currentTypesToParameters keysAndValuesDo: [:k :v |
-		v isNil ifTrue: [finalTypes at: index put: k] 
-			  ifFalse: [finalTypes at: index put: v].
-		index := index + 1.
-	].
-	
+	finalTypes := self readInferredTypes.
 	self removeLastAnalysisFrame.
-	^(RawToLiveTypesAdapter new adapt: finalTypes).! !
+	
+	^finalTypes.! !
 
-!GANonConfigurableStorage methodsFor: 'analysis' stamp: 'AC 4/18/2023 22:41:24'!
+!GANonConfigurableStorage methodsFor: 'analysis' stamp: 'AC 8/9/2023 13:36:46'!
 inferredTypesAsSet
 	
-	| finalTypes index currentTypesToParameters |
+	| finalTypes |
 	
-	currentTypesToParameters := self typesToParameters.
-	finalTypes := Array new: currentTypesToParameters size.
-	index := 1.
-	currentTypesToParameters keysAndValuesDo: [:k :v |
-		v isNil ifTrue: [finalTypes at: index put: k] 
-			  ifFalse: [finalTypes at: index put: v].
-		index := index + 1.
-	].
-	
+	finalTypes := self readInferredTypesAsSet.
 	self removeLastAnalysisFrame.
-	^(RawToLiveTypesAdapter new adaptToSet: finalTypes).! !
+	
+	^finalTypes.! !
 
 !GANonConfigurableStorage methodsFor: 'analysis' stamp: 'AC 5/1/2023 22:06:37'!
 initializeAnalysisForTypes: types 
@@ -4962,6 +5182,22 @@ mergeTypes: aLiveType
 			].
 		].	
 	].! !
+
+!GANonConfigurableStorage methodsFor: 'analysis' stamp: 'AC 8/9/2023 13:36:11'!
+readInferredTypesAsSet
+	
+	| finalTypes index currentTypesToParameters |
+	
+	currentTypesToParameters := self typesToParameters.
+	finalTypes := Array new: currentTypesToParameters size.
+	index := 1.
+	currentTypesToParameters keysAndValuesDo: [:k :v |
+		v isNil ifTrue: [finalTypes at: index put: k] 
+			  ifFalse: [finalTypes at: index put: v].
+		index := index + 1.
+	].
+	
+	^(RawToLiveTypesAdapter new adaptToSet: finalTypes).! !
 
 !GANonConfigurableStorage methodsFor: 'analysis' stamp: 'AC 3/28/2023 01:21:42'!
 trackMessageSendsFor: aMethodReference 
@@ -4991,12 +5227,12 @@ genericTypes
 
 	^generics copy.! !
 
-!GANonConfigurableStorage methodsFor: 'accessing' stamp: 'AC 3/27/2023 09:10:26'!
+!GANonConfigurableStorage methodsFor: 'accessing' stamp: 'AC 7/23/2023 14:15:58'!
 getterMethodsFor: aClassOrLiveType
 	
 	| getters theClass |
-	theClass _ (aClassOrLiveType isKindOf: ClassLiveType ) ifTrue: [aClassOrLiveType liveClass] ifFalse:[aClassOrLiveType].
-	getters _ getterMethods at: theClass ifAbsent:[OrderedCollection new].
+	theClass := (aClassOrLiveType isKindOf: ClassLiveType ) ifTrue: [aClassOrLiveType liveClass] ifFalse:[aClassOrLiveType].
+	getters := getterMethods at: theClass ifAbsent:[Dictionary new].
 	^getters copy.! !
 
 !GANonConfigurableStorage methodsFor: 'accessing' stamp: 'AC 5/2/2023 00:32:27'!
@@ -5032,6 +5268,13 @@ tracedMethodsFor: aClass
 	
 	| traced |
 	traced _ tracedMethods at: aClass ifAbsent:[Dictionary new].
+	^traced copy.! !
+
+!GANonConfigurableStorage methodsFor: 'accessing' stamp: 'AC 7/30/2023 21:14:31'!
+tracedMethodsFromParametersFor: aClass 
+	
+	| traced |
+	traced := tracedMethodsParameters at: aClass ifAbsent:[Dictionary new].
 	^traced copy.! !
 
 !GANonConfigurableStorage methodsFor: 'accessing' stamp: 'AC 4/30/2023 20:10:42'!
@@ -5086,6 +5329,63 @@ removeLastAnalysisFrame
 typesToParameters
 
 	^analysisFrames last at: 'typesToParameters'.! !
+
+!GANonConfigurableStorage methodsFor: 'analysis-progress' stamp: 'AC 8/9/2023 13:32:14'!
+computedValueFor: aTfgNode on: aCompiledMethodOrClass
+
+	| progress |
+	progress := analysisProgress at: aCompiledMethodOrClass ifAbsentPut: [{Dictionary new. Set new.}].
+	^(progress at: 1) at: aTfgNode.
+	! !
+
+!GANonConfigurableStorage methodsFor: 'analysis-progress' stamp: 'AC 8/9/2023 12:56:39'!
+isComputed: aTfgNode on: aCompiledMethodOrClass
+
+	| progress |
+	progress := analysisProgress at: aCompiledMethodOrClass ifAbsentPut: [{Dictionary new. Set new.}].
+	^(progress at: 1) includes: aTfgNode.
+	! !
+
+!GANonConfigurableStorage methodsFor: 'analysis-progress' stamp: 'AC 8/9/2023 12:56:43'!
+isUnderAnalysis: aTfgNode on: aCompiledMethodOrClass
+
+	| progress |
+	progress := analysisProgress at: aCompiledMethodOrClass ifAbsentPut: [{Dictionary new. Set new.}].
+	^(progress at: 2) includes: aTfgNode.
+	! !
+
+!GANonConfigurableStorage methodsFor: 'analysis-progress' stamp: 'AC 8/9/2023 13:42:20'!
+markComputed: aTfgNode on: aCompiledMethodOrClass withType: aLiveType
+
+	| progress |
+	progress := analysisProgress at: aCompiledMethodOrClass ifAbsentPut: [{Dictionary new. Set new.}].
+	(progress at: 2) remove: aTfgNode ifAbsent: [].
+	(progress at: 1) at: aTfgNode put: aLiveType.
+	! !
+
+!GANonConfigurableStorage methodsFor: 'analysis-progress' stamp: 'AC 8/9/2023 12:56:54'!
+markUnderAnalisys: aTfgNode on: aCompiledMethodOrClass
+
+	| progress |
+	progress := analysisProgress at: aCompiledMethodOrClass ifAbsentPut: [{Dictionary new. Set new.}].
+	(progress at: 2) add: aTfgNode.
+	! !
+
+!GANonConfigurableStorage methodsFor: 'analysis-progress' stamp: 'AC 8/9/2023 13:35:58'!
+readInferredTypes
+	
+	| finalTypes index currentTypesToParameters |
+	
+	currentTypesToParameters := self typesToParameters.
+	finalTypes := Array new: currentTypesToParameters size.
+	index := 1.
+	currentTypesToParameters keysAndValuesDo: [:k :v |
+		v isNil ifTrue: [finalTypes at: index put: k] 
+			  ifFalse: [finalTypes at: index put: v].
+		index := index + 1.
+	].
+	
+	^(RawToLiveTypesAdapter new adapt: finalTypes).! !
 
 !GAConfigurableStorage methodsFor: 'tracing' stamp: 'AC 5/3/2023 00:46:32'!
 addGeneric: aClass 
@@ -5156,19 +5456,15 @@ traceConstructor: aMethodReference for: aType onParametersFromArgs: anArgumentIn
  
 	constructorMethods at: aMethodReference put: (GenericTypeConstructor for: aType from: aMethodReference onParamsFromArgs: anArgumentIndexCollection).! !
 
-!GAConfigurableStorage methodsFor: 'initialization' stamp: 'AC 5/3/2023 00:53:20'!
+!GAConfigurableStorage methodsFor: 'initialization' stamp: 'AC 8/2/2023 01:51:57'!
 initialize
 
-	"common to all analyses"
-	generics := Dictionary new.
-	tracedMethods := Dictionary new.
-	tracedMethodsParameters := Dictionary new.
-	getterMethods := Dictionary new.
-	constructorMethods := Dictionary new.
-	
-	"common to an analysis and all its sub-analises"
-	graphs := Dictionary new. 
-	analysisFrames := OrderedCollection new.! !
+	self 
+		initializeGenerics: Dictionary new 
+		tracedMethods: Dictionary new 
+		tracedMethodsParameters: Dictionary new
+		getterMethods: Dictionary new
+		constructorMethods: Dictionary new.! !
 
 !GAConfigurableStorage methodsFor: 'converting' stamp: 'AC 5/3/2023 00:55:32'!
 asNonConfigurableStorage
@@ -5179,6 +5475,23 @@ asNonConfigurableStorage
 		tracedMethodsParameters: tracedMethodsParameters 
 		getterMethods: getterMethods 
 		constructorMethods: constructorMethods! !
+
+!ExampleObserver methodsFor: 'as yet unclassified' stamp: 'AC 8/6/2023 19:14:17'!
+countOf: selector
+
+	^count at: selector ifAbsent: [0].! !
+
+!ExampleObserver methodsFor: 'as yet unclassified' stamp: 'AC 8/6/2023 19:09:38'!
+initialize
+
+	count := Dictionary new.! !
+
+!ExampleObserver methodsFor: 'as yet unclassified' stamp: 'AC 8/6/2023 19:09:27'!
+notify: aMessage
+
+	| c |
+	c := count at: (aMessage selector) ifAbsentPut: [0].
+	count at:  (aMessage selector) put: c + 1.! !
 
 !GenericsExamples methodsFor: 'as yet unclassified' stamp: 'AC 5/3/2023 02:31:00'!
 example1
@@ -5380,17 +5693,21 @@ object: anObject
 
 	^self new initializeFor: anObject.! !
 
-!ObservedExample methodsFor: 'as yet unclassified' stamp: 'AC 5/3/2023 04:20:54'!
+!ObservedExample methodsFor: 'as yet unclassified' stamp: 'AC 8/6/2023 19:15:04'!
 example
 
-	| tmp1 tmp2 tmp3 |
+	| tmp1 tmp2 tmp3 observer |
+	
+	observer := ExampleObserver new.
 	
 	tmp1 := Observed object: 1.
-	tmp2 := 2 = (tmp1 + 1).
+	tmp1 addObserver: observer.
+	tmp1 addObservedMessage: #+.
 	
-	tmp3 := Observed object: 'str'.
-	tmp3 := Observed object: (OrderedCollection with: 1).
-! !
+	tmp2 :=  (tmp1 + 1) = 2.
+	
+	tmp3 := (observer countOf: #+) = 1.
+	! !
 
 !ClassSharingProtocolA methodsFor: 'as yet unclassified' stamp: 'AC 4/11/2023 21:04:53'!
 addToCollection: aCollection
@@ -5597,7 +5914,7 @@ deleteOldLiveTypingMethods
 	].
 	! !
 
-!LiveTypingGenerics class methodsFor: 'private' stamp: 'AC 7/19/2023 18:50:53'!
+!LiveTypingGenerics class methodsFor: 'private' stamp: 'AC 7/30/2023 20:57:08'!
 initializeGenericClassesInfo
 
 	LiveTyping initializeGenerics.
@@ -5621,7 +5938,7 @@ initializeGenericClassesInfo
 		IdentityDictionary.
 		OrderedDictionary.
 		
-		"the next classes only have very basic support"
+		"the following classes only have very basic support"
 		WeakArray.
 		WeakKeyDictionary.
 		WeakIdentityKeyDictionary.
@@ -5678,7 +5995,7 @@ asLiveType
 
 	^GenericType for: self class withTypes: (self collect: [:e | e asLiveType]).! !
 
-!Collection class methodsFor: '*LiveTypingGenerics-initialization' stamp: 'AC 5/3/2023 01:22:33'!
+!Collection class methodsFor: '*LiveTypingGenerics-initialization' stamp: 'AC 7/30/2023 21:59:25'!
 initializeGeneric
 
 	| lt |
@@ -5706,6 +6023,10 @@ initializeGeneric
 		#(#with:with:with:with: #(1 2 3 4)).
 		#(#with:with:with:with:with: #(1 2 3 4 5)).
 		#(#with:with:with:with:with:with: #(1 2 3 4 5 6)).
+		
+		"just for optimization"
+		#(#new #()).
+		#(#new: #()).
 	}
 	do: [:aSelectorAndArgListTuple |
 		lt traceConstructor: 
@@ -5901,13 +6222,13 @@ initializeGeneric
 
 	"not a generic type in hierarchy, do nothing"! !
 
-!CompiledMethod methodsFor: '*LiveTypingGenerics-private' stamp: 'AC 4/20/2023 00:13:24'!
+!CompiledMethod methodsFor: '*LiveTypingGenerics-private' stamp: 'AC 8/9/2023 10:50:17'!
 driverForTempVariable: aVarName forTypes: types storage: aStorage
 	
-	| index |
-	index := self typeAnnotationsHolder variableNameToTypeIndex at: aVarName ifAbsent: [-1].
-	((0 < index) and: [index <= self numArgs])
-		ifTrue: [^GAMethodArgumentAnalysisDriver for: aVarName withIndex: index in: self forTypes: types storage: aStorage]
+	|  argumentNames |
+	argumentNames := self methodNode argumentNames.
+	(argumentNames includes: aVarName)
+		ifTrue: [^GAMethodArgumentAnalysisDriver for: aVarName withIndex: (argumentNames indexOf: aVarName) in: self forTypes: types storage: aStorage]
 		ifFalse: [^GALocalVarAnalysisDriver for: aVarName in: self forTypes: types storage: aStorage].
 		
 	! !
@@ -5926,11 +6247,18 @@ liveTypesOfVariableNamed: aVarName storingGenericsInfoIn: aStorage ifAbsent: aBl
 	driver runAnalysis.
 	^driver inferredTypes.! !
 
-!CompiledMethod methodsFor: '*LiveTypingGenerics' stamp: 'AC 4/18/2023 23:26:44'!
+!CompiledMethod methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/16/2023 00:56:51'!
 returnLiveTypes: aStorage
 
-	| driver |
-	driver := GAReturnValueAnalysisDriver in: self forTypes: self returnTypes storage: aStorage.
+	^self returnLiveTypesForReceiver: self methodClass usingStorage: aStorage.! !
+
+!CompiledMethod methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/16/2023 00:56:13'!
+returnLiveTypesForReceiver: aReceiverType usingStorage: aStorage
+
+	| driver returnClassTypes |
+	
+	returnClassTypes := self returnTypes collect: [:aType | aType asTypeFor: aReceiverType].
+	driver := GAReturnValueAnalysisDriver in: self forTypes: returnClassTypes storage: aStorage.
 	driver runAnalysis.
 	^driver inferredTypes.! !
 
@@ -6185,7 +6513,7 @@ initializeGeneric
 	lt stopTracing: #at:put:  for: self.
 	lt stopTracing: #at:  for: self.! !
 
-!Dictionary class methodsFor: '*LiveTypingGenerics-initialization' stamp: 'AC 7/19/2023 01:07:43'!
+!Dictionary class methodsFor: '*LiveTypingGenerics-initialization' stamp: 'AC 8/6/2023 16:31:18'!
 initializeGeneric
 
 	| lt |
@@ -6197,12 +6525,10 @@ initializeGeneric
 	
 	"constructors from arguments - no support for multiple poymorphic parameters"
 
-		
 	"polymorphic parameters accessors"
 	lt addGetterFor: self on: #at: forParameter: 2.
 	lt addGetterFor: self on: #keyAt: forParameter: 1.
 	lt addGetterFor: self on: #keyAtValue: forParameter: 1.
-	
 	
 	"polymorphic parameters setters from arguments"
 	lt trace: #at:put: for: self onArgs: {1->1. 2->2}.
@@ -6473,7 +6799,7 @@ basicTypesIn: aCompiledMethod addingIncompleteTypeInfoTo: incompleteTypeInfoReas
 	
 	^ aCompiledMethod typesOfInstanceVariableNamed: name ifAbsent: [ #() ]! !
 
-!InstanceVariableNode methodsFor: '*LiveTypingGenerics-livetypes' stamp: 'AC 4/13/2023 13:11:32'!
+!InstanceVariableNode methodsFor: '*LiveTypingGenerics-livetypes' stamp: 'AC 8/16/2023 02:00:03'!
 liveTypesIn: aCompiledMethod addingIncompleteTypeInfoTo: incompleteTypeInfoReasons storingGenericsInfoIn: aStorage
 	
 	^aCompiledMethod liveTypesOfInstanceVariableNamed: name storingGenericsInfoIn: aStorage ifAbsent: [`EmptyType new`].! !
@@ -6548,40 +6874,32 @@ basicTypesIn: aCompiledMethod addingIncompleteTypeInfoTo: incompleteTypeInfoReas
 		
 	^types! !
 
-!MessageNode methodsFor: '*LiveTypingGenerics-livetypes' stamp: 'AC 5/2/2023 00:30:47'!
+!MessageNode methodsFor: '*LiveTypingGenerics-livetypes' stamp: 'AC 7/24/2023 00:18:44'!
 liveTypesIn: aCompiledMethod addingIncompleteTypeInfoTo: incompleteTypeInfoReasons castingWith: aTypeCastApplier storingGenericsInfoIn: aStorage
 	
 	| messageReturnTypes sentSelector receiverTypes  |
-	"self halt."
+
 	sentSelector := self selectorSymbol.
 	receiverTypes := aTypeCastApplier receiverLiveTypesFor: self in: aCompiledMethod addingIncompleteTypeInfoTo:  incompleteTypeInfoReasons storingGenericsInfoIn: aStorage.
 	
 	messageReturnTypes := Set new.
-	receiverTypes liveTypesDo: [:aReceiverType | | currentReceiver currentMethodRef | 								
-			currentReceiver := aReceiverType liveClass.
-			currentMethodRef := (MethodReference class: currentReceiver selector: sentSelector).
+	receiverTypes liveTypesDo: [:aReceiverType | | currentReceiverClass currentMethodRef | 								
+			currentReceiverClass := aReceiverType liveClass.
+			currentMethodRef := (MethodReference class: currentReceiverClass selector: sentSelector).
 			(aStorage genericTypeConstructorFrom: currentMethodRef) 
 				ifNil: [
-					(currentReceiver lookupSelector: sentSelector) 
+					(currentReceiverClass lookupSelector: sentSelector) 
 						ifNil: [ incompleteTypeInfoReasons add: (
 							IncompleteTypeInfoError dueToMissingImplementationOf: currentMethodRef) ]
-						ifNotNil: [ :implementor | | returnTypes |
-							"handle getter for generic types first"
-							((aReceiverType isGenericType) and: [aStorage getterMethodsFor: aReceiverType includes: sentSelector]) ifTrue: [
-								| parameterIndex |
-								parameterIndex := (aStorage getterMethodsFor: aReceiverType) at: sentSelector.
-								messageReturnTypes addAll: (aReceiverType generics at: parameterIndex).
-							]
-							ifFalse:[
-								returnTypes := implementor returnLiveTypes: aStorage.
-								returnTypes isEmpty
-									ifTrue: [ incompleteTypeInfoReasons add: (IncompleteTypeInfoWarning dueToNoReturnTypeOf: implementor methodReference) ]
-									ifFalse: [
-								returnTypes := returnTypes collect: [ :aType | aType asTypeFor: currentReceiver].
-								messageReturnTypes addAll: returnTypes.
-										]].
+						ifNotNil: [ :implementor |
+							self returnTypesOf: implementor 
+								from: aReceiverType 
+								receiving: sentSelector 
+								in: aCompiledMethod
+								addingReturnTypesTo: messageReturnTypes 
+								addingIncompleteTypeInfoTo: incompleteTypeInfoReasons 
+								storingGenericsInfoIn: aStorage
 							].
-					1
 				] 
 				ifNotNil: [:aGenericTypeConstructor | 
 					messageReturnTypes add: (aGenericTypeConstructor in: aCompiledMethod forArguments: self argumentsInEvaluationOrder storingGenericsInfoIn: aStorage).
@@ -6610,6 +6928,43 @@ receiverLiveTypesIn: aCompiledMethod addingIncompleteTypeInfoTo: incompleteTypeI
 receiverTypesIn: aCompiledMethod addingIncompleteTypeInfoTo: incompleteTypeInfoReasons castingWith: aTypeCastApplier 
 	
 	^self receiverOrCascadeReceiver basicTypesIn: aCompiledMethod addingIncompleteTypeInfoTo: incompleteTypeInfoReasons castingWith: aTypeCastApplier ! !
+
+!MessageNode methodsFor: '*LiveTypingGenerics-livetypes' stamp: 'AC 8/16/2023 01:04:35'!
+returnTypesOf: implementor from: aReceiverType receiving: sentSelector in: aCompiledMethod addingReturnTypesTo: messageReturnTypes addingIncompleteTypeInfoTo: incompleteTypeInfoReasons storingGenericsInfoIn: aStorage
+
+	| returnTypes |
+
+	"generic getter case"
+	((aReceiverType isGenericType) and: [aStorage getterMethodsFor: aReceiverType includes: sentSelector]) ifTrue: [
+		| parameterIndex |
+		parameterIndex := (aStorage getterMethodsFor: aReceiverType) at: sentSelector.
+		messageReturnTypes addAll: (aReceiverType generics at: parameterIndex).
+		^self.
+	].
+	
+	"generic setter case"
+	(((aStorage tracedMethodsFor: aReceiverType liveClass) includesKey: sentSelector)
+		or: [(aStorage tracedMethodsFromParametersFor: aReceiverType liveClass) includesKey: sentSelector])
+		ifTrue: [ | lastArgument argumentType |
+		"setters need to receive the object from where the type will be set, then there's at least one argument - Adrian"
+		lastArgument := self argumentsInEvaluationOrder last.
+		argumentType := lastArgument 
+						liveTypesIn: aCompiledMethod 
+						addingIncompleteTypeInfoTo: incompleteTypeInfoReasons 
+						storingGenericsInfoIn: aStorage.
+						
+		messageReturnTypes add: argumentType.
+		^self.	
+	].
+	
+	"general case"
+	returnTypes := implementor returnLiveTypesForReceiver: aReceiverType liveClass usingStorage: aStorage.
+	returnTypes isEmpty
+		ifTrue: [ incompleteTypeInfoReasons add: (IncompleteTypeInfoWarning dueToNoReturnTypeOf: implementor methodReference) ]
+		ifFalse: [
+			returnTypes := returnTypes collect: [ :aType | aType asTypeFor: aReceiverType liveClass].
+			messageReturnTypes addAll: returnTypes.
+		].! !
 
 !MessageNode methodsFor: '*LiveTypingGenerics' stamp: 'AC 4/7/2023 13:25:55'!
 typesIn: aCompiledMethod addingIncompleteTypeInfoTo: incompleteTypeInfoReasons  
@@ -6689,6 +7044,20 @@ visitMessageNode: aMessageNode
 		receiverTypes := aMessageNode receiverOrCascadeReceiver basicTypesIn: currentSender addingIncompleteTypeInfoTo: OrderedCollection new.
 		(self isMessageSendToAnyImplementor: receiverTypes) ifTrue: [ self add: aMessageNode toNotIncludedReceiverTypesIfCorrespond: receiverTypes ]].! !
 
+!SmalltalkEditor methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/6/2023 20:53:55'!
+balloonTypeInfoOfInstanceVariableAt: mousePositionInText
+
+	| instVarName typeInfo types |
+	
+	instVarName := (self wordUnder: mousePositionInText) asString.
+	"typeInfo := self codeProvider selectedClass typeInfoOfInstanceVariableNamed: instVarName ifAbsent: [^'']."
+	types := self codeProvider selectedClass 
+				liveTypesOfInstanceVariableNamed: instVarName 
+				storingGenericsInfoIn: (LiveTyping getGenericsStorage) 
+				ifAbsent: [`EmptyType new`].
+	typeInfo := InstanceVariableTypeInfo of: instVarName in: self codeProvider selectedClass are: types asArray.
+	^typeInfo printTypesUpTo: 5! !
+
 !NotImplementedMethod methodsFor: '*LiveTypingGenerics' stamp: 'AC 4/13/2023 14:20:08'!
 analyzeGenericsOn: aTfgNode storingGenericsInfoIn: aStorage
 
@@ -6706,6 +7075,11 @@ liveTypesOfVariableNamed: aVarName storingGenericsInfoIn: aStorage ifAbsent: anA
 
 !NotImplementedMethod methodsFor: '*LiveTypingGenerics' stamp: 'AC 4/24/2023 01:04:08'!
 returnLiveTypes: aStorage
+
+	^`EmptyType new`! !
+
+!NotImplementedMethod methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/16/2023 01:03:06'!
+returnLiveTypesForReceiver: aReceiverType usingStorage: aStorage
 
 	^`EmptyType new`! !
 
@@ -6741,7 +7115,109 @@ test06newTypeIsMetaclassSoleInstance
 	self assert: method returnTypes asSet equals: types
 ! !
 
-!LiveTypingSmalltalkCompleter methodsFor: '*LiveTypingGenerics' stamp: 'AC 7/19/2023 00:57:41'!
+!VariableTypeInfoTest methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/17/2023 21:03:50'!
+test06CommonSupertypeOfSiblingsClassesReturnsRightSuperclass
+
+	| variableTypeInfo |
+
+	variableTypeInfo := VariableTypeInfo new initializeRawTypes: (Array new: 10).
+
+	variableTypeInfo addType: (FixedType for: (1 class)).
+	variableTypeInfo addType: (FixedType for: (1.0 class)).
+
+	self assert: Number equals: variableTypeInfo commonSupertype.! !
+
+!VariableTypeInfoTest methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/17/2023 21:04:56'!
+test07CommonSupertypeOnSameHierarchyIsMostTopClass
+
+	| variableTypeInfo |
+
+	variableTypeInfo := VariableTypeInfo new initializeRawTypes: (Array new: 10).
+
+	variableTypeInfo addType: (FixedType for: 'hello' class).
+	variableTypeInfo addType: (FixedType for: #hello class).
+
+	self assert: String equals: variableTypeInfo commonSupertype.! !
+
+!VariableTypeInfoTest methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/17/2023 21:05:22'!
+test08CommonSupertypeOnSameHierarchyIsNotAffectedByAddingOrder
+
+	| variableTypeInfo |
+
+	variableTypeInfo := VariableTypeInfo new initializeRawTypes: (Array new: 10).
+
+	variableTypeInfo addType: (FixedType for: 'hello' class).
+	variableTypeInfo addType: (FixedType for: #hello class).
+
+	self assert: String equals: variableTypeInfo commonSupertype.! !
+
+!VariableTypeInfoTest methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/17/2023 21:05:43'!
+test09ObjectIsCommonSupertypeWhenClassesAreNotSiblings
+
+	| variableTypeInfo |
+
+	variableTypeInfo := VariableTypeInfo new initializeRawTypes: (Array new: 10).
+
+	variableTypeInfo addType: (FixedType for: 'hello' class).
+	variableTypeInfo addType: (FixedType for: 1 class).
+
+	self assert: Object equals: variableTypeInfo commonSupertype.! !
+
+!VariableTypeInfoTest methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/17/2023 21:06:31'!
+test30CommonSupertypeIfGenericEvaluatesIfGenericBlockForObject
+
+	| variableTypeInfo |
+
+	variableTypeInfo := VariableTypeInfo new initializeRawTypes: (Array new: 2).
+
+	variableTypeInfo addType: (FixedType for: 1 class).
+	variableTypeInfo addType: (FixedType for: $a class).
+
+	variableTypeInfo commonSupertypeIfGeneric: [ :aGenericSupertype | ^ self assert: aGenericSupertype equals: Object ].
+	self fail.! !
+
+!VariableTypeInfoTest methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/17/2023 21:06:58'!
+test31CommonSupertypeIfGenericEvaluatesIfGenericBlockForProtoObject
+
+	| variableTypeInfo |
+
+	variableTypeInfo := VariableTypeInfo new initializeRawTypes: (Array new: 2).
+
+	variableTypeInfo addType: (FixedType for: Object).
+	variableTypeInfo addType: (FixedType for: MessageCatcher) .
+
+	variableTypeInfo commonSupertypeIfGeneric: [ :aGenericSupertype | ^ self assert: aGenericSupertype equals: ProtoObject ].
+	self fail.! !
+
+!VariableTypeInfoTest methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/17/2023 21:07:26'!
+test32WithCommonSupertypeDoIfGenericEvaluatesDoBlockWhenNoGenericSupertype
+
+	| variableTypeInfo |
+
+	variableTypeInfo := VariableTypeInfo new initializeRawTypes: (Array new: 2).
+
+	variableTypeInfo addType: (FixedType for: 1 class).
+	variableTypeInfo addType: (FixedType for: 1.0 class).
+
+	variableTypeInfo 
+		withCommonSupertypeDo: [ :commonSupertype | self assert: commonSupertype equals: Number ]
+		ifGeneric: [ :aGenericSupertype | self fail ]! !
+
+!VariableTypeInfoTest methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/17/2023 21:07:57'!
+test33WithCommonSupertypeDoIfGenericEvaluatesGenericBlockWhenGenericSupertype
+
+	| variableTypeInfo |
+
+	variableTypeInfo := VariableTypeInfo new initializeRawTypes: (Array new: 2).
+
+	variableTypeInfo addType: (FixedType for: 1 class).
+	variableTypeInfo addType: (FixedType for: $a class).
+
+	variableTypeInfo 
+		withCommonSupertypeDo: [ :commonSupertype | self fail ]
+		ifGeneric: [ :aGenericSupertype | self assert: aGenericSupertype equals: Object ]! !
+
+!LiveTypingSmalltalkCompleter methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/16/2023 00:22:25'!
 commonSupertypeOrSelectorsOf: aNodeUnderCursor in: aMethodNode  
 	
 	| methodToAnalyze types liveTypes methodClass |
@@ -6776,14 +7252,14 @@ actualImplementorsAndSendersWhenOnMessageSend
 		andActualSendersTo: senders 
 		inSystem: Smalltalk ! !
 
-!BrowseActualSelectors methodsFor: '*LiveTypingGenerics-private' stamp: 'AC 4/4/2023 09:51:07'!
+!BrowseActualSelectors methodsFor: '*LiveTypingGenerics-private' stamp: 'AC 8/17/2023 23:02:08'!
 browseActualMessageNode: messageNode 
-
+self halt.
 	sentSelector := messageNode selector key.
 	incompleteTypeInfoReasons := Set new.
-	types := messageNode receiverOrCascadeReceiver basicTypesIn: methodToLookUp addingIncompleteTypeInfoTo: incompleteTypeInfoReasons.
+	types := messageNode receiverOrCascadeReceiver typesIn: methodToLookUp addingIncompleteTypeInfoTo: incompleteTypeInfoReasons.
 
-	types isEmpty 
+	types isEmptyType
 		ifTrue: [ self browseActualWithNoTypeInfoSendTo: messageNode receiverOrCascadeReceiver ]
 		ifFalse: [ self browseActualWithTypeInfo ].
 		
@@ -6856,10 +7332,38 @@ traceConstructor: aMethodReference for: aType onParametersFromArgs: anArgumentIn
 
 	genericsStorage traceConstructor: aMethodReference for: aType onParametersFromArgs: anArgumentIndexCollection! !
 
-!VariableTypeInfo methodsFor: '*LiveTypingGenerics' stamp: 'AC 4/9/2023 21:37:52'!
+!ParseNodeTypeInfo methodsFor: '*LiveTypingGenerics' stamp: 'AC 7/21/2023 10:01:21'!
+visitMessageNode: aMessageNode
+	
+	| implementors receiverTypes |
+	
+	receiverTypes := aMessageNode receiverOrCascadeReceiver typesIn: method addingIncompleteTypeInfoTo: Set new.
+	implementors := IdentitySet new.
+	receiverTypes classTypesDo: [ :aType | (aType lookupSelector: aMessageNode selectorSymbol) ifNotNil: [ :implementor | implementors add: implementor ]].
+	
+	implementors size = 1 ifTrue: [ typeInfo := implementors anyOne returnTypeInfo ]! !
+
+!ParseNodeTypesDisplay methodsFor: '*LiveTypingGenerics' stamp: 'AC 7/21/2023 09:59:35'!
+showTypes
+
+	types isEmptyType 
+		ifTrue: [ self inform: 'There is no type info for ', parseNodeToAnalize nodeTypeAndIdentifierPrintString ]
+		ifFalse: [ self showTypesWhenNotEmpty ].
+	! !
+
+!VariableTypeInfo methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/18/2023 00:00:16'!
+commonSupertype
+	
+	"^self commonSupertypeIfNoTypes: [ ProtoObject ]"
+	| liveTypes types |
+	liveTypes := RawToLiveTypesAdapter new adapt: self types.
+	types := Set new.
+	liveTypes classTypesDo: [:aClass | types add: aClass].
+	^(SupertypeDetective new: types) search.! !
+
+!VariableTypeInfo methodsFor: '*LiveTypingGenerics' stamp: 'AC 8/16/2023 02:03:22'!
 printTypesOn: aStream upTo: aNumberOfTypes
 
-	"self print: self types on: aStream upTo: aNumberOfTypes."
 	| liveTypes |   
 	
         liveTypes := RawToLiveTypesAdapter new adapt: self types.   
