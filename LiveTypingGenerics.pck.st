@@ -1,6 +1,6 @@
-'From Cuis 6.0 [latest update: #5706] on 18 August 2023 at 12:42:59 am'!
+'From Cuis 6.0 [latest update: #5706] on 21 August 2023 at 11:42:01 pm'!
 'Description This package adds to LiveTyping the capability of detecting polymorphic parameters in generic classes such as Array. '!
-!provides: 'LiveTypingGenerics' 0 10!
+!provides: 'LiveTypingGenerics' 0 11!
 !requires: 'LiveTyping' 1 97 nil!
 SystemOrganization addCategory: 'LiveTypingGenerics-Foundation'!
 SystemOrganization addCategory: 'LiveTypingGenerics-Core'!
@@ -985,7 +985,7 @@ test026EnumeratingLiveAndClassTypes
 	self assert: unionTypeLiveTypes equals: (Set with: fixedType with: genericType).
 ! !
 
-!FlowGraphCreationTest methodsFor: 'setUp/tearDown' stamp: 'AC 5/3/2023 00:48:14'!
+!FlowGraphCreationTest methodsFor: 'setUp/tearDown' stamp: 'AC 8/21/2023 23:11:13'!
 setUp
 
 	storage := GAConfigurableStorage new.
@@ -995,8 +995,7 @@ setUp
 	
 	driver := GAFlowGraphCreationDriver for: (self class >> testSelector)
 				visitor: visitor
-				storage: storage
-				callerDriver: nil! !
+				storage: storage! !
 
 !FlowGraphCreationTest methodsFor: 'graph building' stamp: 'AC 4/17/2023 20:20:07'!
 test01onVarToVarAssigmentAssignorFlowsToAssignee
@@ -3946,7 +3945,7 @@ print: liveTypes upTo: aNumberOfTypes withDelimiter: printDelimiter
 	
 ! !
 
-!LiveTypesPrinter methodsFor: 'as yet unclassified' stamp: 'AC 8/16/2023 02:11:12'!
+!LiveTypesPrinter methodsFor: 'as yet unclassified' stamp: 'AC 8/21/2023 23:41:32'!
 print: typesTreeArray withDelimiter: printDelimiter
 	| treeBound treeGenerics canBeNilTmp |
 	
@@ -3982,7 +3981,7 @@ print: typesTreeArray withDelimiter: printDelimiter
 	printDelimiter ifTrue: [
 		stream nextPut: $>.
 	].
-	stream newLine! !
+	"stream newLine"! !
 
 !LiveTypesPrinter methodsFor: 'as yet unclassified' stamp: 'alf and mtqp 2/16/2020 17:10:02'!
 visitEmptyType: anEmptyType
@@ -4462,8 +4461,8 @@ compiledMethod: aCompiledMethod
 	currentCompiledMethod := aCompiledMethod.
 	currentGraph := storage graphFor: aCompiledMethod.! !
 
-!GAFlowGraphCreationDriver methodsFor: 'initialization' stamp: 'AC 4/24/2023 12:51:33'!
-initializeFor: aCompiledMethod visitor: aGAVisitor storage: aGAStorage callerDriver: aGADriver
+!GAFlowGraphCreationDriver methodsFor: 'initialization' stamp: 'AC 8/21/2023 23:10:40'!
+initializeFor: aCompiledMethod visitor: aGAVisitor storage: aGAStorage
 
 	"this driver only generates the graph for the compiled method, then returns to other driver that performs the actual analysis"
 
@@ -4588,12 +4587,12 @@ isPseudoVariable: aVariableNode
 		or: [aVariableNode isSelfPseudoVariable] 
 		or: [aVariableNode isSelfPseudoVariable]) or: [aVariableNode isThisContextPseudoVariable]! !
 
-!GAFlowGraphCreationDriver class methodsFor: 'as yet unclassified' stamp: 'AC 4/14/2023 16:26:35'!
-for: aCompiledMethod visitor: aGAVisitor  storage: aGAStorage callerDriver: aGADriver
+!GAFlowGraphCreationDriver class methodsFor: 'as yet unclassified' stamp: 'AC 8/21/2023 23:10:25'!
+for: aCompiledMethod visitor: aGAVisitor  storage: aGAStorage 
 
-	^self new initializeFor: aCompiledMethod visitor: aGAVisitor storage: aGAStorage callerDriver: aGADriver.! !
+	^self new initializeFor: aCompiledMethod visitor: aGAVisitor storage: aGAStorage! !
 
-!GALocalVarAnalysisDriver methodsFor: 'initialization' stamp: 'AC 7/30/2023 20:10:41'!
+!GALocalVarAnalysisDriver methodsFor: 'initialization' stamp: 'AC 8/21/2023 23:09:57'!
 initializeFor: aTfgVariableNode in: aCompiledMethod forTypes: types storage: anAnalysisStorage   
 
 	visitor := GAVisitor new.
@@ -4604,7 +4603,7 @@ initializeFor: aTfgVariableNode in: aCompiledMethod forTypes: types storage: anA
 	
 	storage := anAnalysisStorage.
 	states := OrderedCollection new.
-	graphBuildingDriver := (GAFlowGraphCreationDriver for: currentCompiledMethod visitor: visitor storage: storage callerDriver: self).
+	graphBuildingDriver := (GAFlowGraphCreationDriver for: currentCompiledMethod visitor: visitor storage: storage).
 	
 	storage initializeAnalysisForTypes: types.
 
@@ -4691,7 +4690,7 @@ addTypesFrom: aMessageNode sentIn: aCompiledMethod
 	]. 
 	! !
 
-!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 8/15/2023 21:20:41'!
+!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 8/21/2023 23:09:48'!
 analyzeMethodCall: aCompiledMethod onArgs: anIndexSet from: aMessageNode
 
 	| node variables implementorGraph |
@@ -4714,7 +4713,7 @@ analyzeMethodCall: aCompiledMethod onArgs: anIndexSet from: aMessageNode
 	self  saveStateForMethod: aCompiledMethod 
 		variables: variables.
 	
-	(GAFlowGraphCreationDriver for: aCompiledMethod visitor: visitor storage: storage callerDriver: self) runAnalysis.
+	(GAFlowGraphCreationDriver for: aCompiledMethod visitor: visitor storage: storage) runAnalysis.
 	
 	visitor driver: self.
 	visitor visit: aCompiledMethod.
@@ -5626,13 +5625,6 @@ example9
 	"also, polymorphic parameter gets returned if method is analyzed"
 	tmp1 at: 1.
 	! !
-
-!GenericsExamples methodsFor: 'as yet unclassified' stamp: 'AC 7/7/2023 00:17:41'!
-m1
-
-	| tmptmp |
-	tmptmp := OrderedCollection with: 'str'.
-	tmptmp := SortedCollection with: 1.! !
 
 !GenericsExamples methodsFor: 'as yet unclassified' stamp: 'AC 5/3/2023 03:08:23'!
 runAllExamples
