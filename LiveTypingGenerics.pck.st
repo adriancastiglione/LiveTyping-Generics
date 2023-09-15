@@ -1,6 +1,6 @@
-'From Cuis 6.0 [latest update: #5706] on 21 August 2023 at 11:42:01 pm'!
-'Description This package adds to LiveTyping the capability of detecting polymorphic parameters in generic classes such as Array. '!
-!provides: 'LiveTypingGenerics' 0 11!
+'From Cuis 6.0 [latest update: #5706] on 15 September 2023 at 10:00:37 am'!
+'Description This package adds to LiveTyping the capability of detecting type parameters in generic types such as Array, using type inference. '!
+!provides: 'LiveTypingGenerics' 0 12!
 !requires: 'LiveTyping' 1 97 nil!
 SystemOrganization addCategory: 'LiveTypingGenerics-Foundation'!
 SystemOrganization addCategory: 'LiveTypingGenerics-Core'!
@@ -11,7 +11,7 @@ SystemOrganization addCategory: 'LiveTypingGenerics'!
 
 !classDefinition: #GAVisitor category: 'LiveTypingGenerics-Core'!
 ParseNodeVisitor subclass: #GAVisitor
-	instanceVariableNames: 'driver nodes'
+	instanceVariableNames: 'driver nodes analizedMethodsCount'
 	classVariableNames: ''
 	poolDictionaries: ''
 	category: 'LiveTypingGenerics-Core'!
@@ -560,12 +560,18 @@ driver: aGenericAnalysisDriver
 
 	driver _ aGenericAnalysisDriver.! !
 
-!GAVisitor methodsFor: 'visiting' stamp: 'AC 8/9/2023 14:53:21'!
+!GAVisitor methodsFor: 'visiting' stamp: 'AC 9/12/2023 21:13:22'!
 visit: aCompiledMethod
 
-	| currentNodes |
+	| currentNodes maximum_methods_to_analyze |
 
-	"this implementation aims to serve as an optimization, as the analysis could involve iterating through the AST of multiple methods. The idea is to not fill up the stack with the function calls made by the visitor pattern. The AST is iterated once and then the stack space is freed up before proceding - Adrian"
+	"this implementation aims to serve as an optimization, as the analysis could involve iterating through the AST of multiple methods. The idea is to not fill up the stack with the function calls made by the visitor pattern. The AST is iterated once and then the stack space is freed before proceding - Adrian"
+
+	maximum_methods_to_analyze := 50.
+	maximum_methods_to_analyze <= analizedMethodsCount ifTrue: [
+		^self.	
+	].
+	analizedMethodsCount := analizedMethodsCount + 1.
 
 	nodes add: OrderedCollection new.
 	aCompiledMethod methodNode accept: self.
@@ -629,10 +635,11 @@ visitReturnNode: aReturnNode
 
 	! !
 
-!GAVisitor methodsFor: 'private' stamp: 'AC 8/9/2023 01:25:51'!
+!GAVisitor methodsFor: 'private' stamp: 'AC 9/12/2023 21:10:32'!
 initialize
 
-	nodes := OrderedCollection new.! !
+	nodes := OrderedCollection new.
+	analizedMethodsCount := 0.! !
 
 !LiveTypeTests methodsFor: 'as yet unclassified' stamp: 'alf & mds 2/5/2020 19:59:29'!
 test001SameType
@@ -4664,10 +4671,11 @@ inferredTypes
 
 	^storage inferredTypes.! !
 
-!GALocalVarAnalysisDriver methodsFor: 'analysis' stamp: 'AC 4/19/2023 02:04:14'!
+!GALocalVarAnalysisDriver methodsFor: 'analysis' stamp: 'AC 9/12/2023 21:28:29'!
 runAnalysis
 
-	storage initializedWithAnyGenericType ifTrue: [
+	(storage initializedWithAnyGenericType and: [storage hasAvailableResourcesForSubAnalyses] )ifTrue: [
+		storage addOneToSubAnalysesCount.
 		self runAnalysisWithoutInitializationCheck
 	].
 	! !
@@ -4690,16 +4698,16 @@ addTypesFrom: aMessageNode sentIn: aCompiledMethod
 	]. 
 	! !
 
-!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 8/21/2023 23:09:48'!
+!GALocalVarAnalysisDriver methodsFor: 'private' stamp: 'AC 9/12/2023 21:14:55'!
 analyzeMethodCall: aCompiledMethod onArgs: anIndexSet from: aMessageNode
 
 	| node variables implementorGraph |
 
-	storage hasAvailableResourcesForMethodAnalysis ifFalse: [
-		"no more resources available, do nothing"
+	"storage hasAvailableResourcesForMethodAnalysis ifFalse: [
+		no more resources available, do nothing
 		^self.	
 	].
-	storage addOneToAnalyzedMethodsCount.
+	storage addOneToAnalyzedMethodsCount."
 
 
 	node := aCompiledMethod methodNode.
@@ -5002,7 +5010,7 @@ initializeForVarNode: aTfgVariableNode withIndex: index in: aCompiledMethod forT
 		forTypes: types 
 		storage: anAnalysisStorage.! !
 
-!GAMethodArgumentAnalysisDriver methodsFor: 'private' stamp: 'AC 8/15/2023 22:23:32'!
+!GAMethodArgumentAnalysisDriver methodsFor: 'private' stamp: 'AC 9/12/2023 21:31:46'!
 runAnalysisWithoutInitializationCheck
 	
 	| sureSenders |
@@ -5014,11 +5022,12 @@ runAnalysisWithoutInitializationCheck
 	sureSenders := (Smalltalk allActualSendersOn: currentCompiledMethod) first.
 	visitor driver: self.
 	sureSenders do: [:aSureSender |
-		storage hasAvailableResourcesForMethodAnalysis ifTrue: [
-			storage addOneToAnalyzedMethodsCount.
+			"self halt."
+		"storage hasAvailableResourcesForMethodAnalysis ifTrue: ["
+			"storage addOneToSubAnalysesCount."
 			currentCompiledMethod := aSureSender compiledMethod.
 			visitor visit: currentCompiledMethod.
-		].
+		"]."
 	].! !
 
 !GAMethodArgumentAnalysisDriver methodsFor: 'analysis' stamp: 'AC 8/4/2023 06:08:28'!
@@ -5098,15 +5107,15 @@ initializeGenerics: aGenerics tracedMethods: aTracedMethods tracedMethodsParamet
 	"common to an analysis and all its subanalises - resource use limitation"
 	analyzedMethodCount := 0.! !
 
-!GANonConfigurableStorage methodsFor: 'resource-utilization' stamp: 'AC 8/15/2023 21:15:44'!
-addOneToAnalyzedMethodsCount
+!GANonConfigurableStorage methodsFor: 'resource-utilization' stamp: 'AC 9/12/2023 21:28:29'!
+addOneToSubAnalysesCount
 
 	analyzedMethodCount := analyzedMethodCount + 1.! !
 
-!GANonConfigurableStorage methodsFor: 'resource-utilization' stamp: 'AC 8/15/2023 22:31:29'!
-hasAvailableResourcesForMethodAnalysis
+!GANonConfigurableStorage methodsFor: 'resource-utilization' stamp: 'AC 9/12/2023 21:35:01'!
+hasAvailableResourcesForSubAnalyses
 
-	^analyzedMethodCount <= 20.! !
+	^analyzedMethodCount <= 10.! !
 
 !GANonConfigurableStorage methodsFor: 'analysis' stamp: 'AC 5/1/2023 23:52:23'!
 addType: aLiveType to: anIndex for: aClassType
@@ -5506,13 +5515,13 @@ example10: aCollection
 	"aCollection receives an Array with a SmallFloat from examples 9 and 11"
 	aCollection at: 1 put: 'str'.! !
 
-!GenericsExamples methodsFor: 'as yet unclassified' stamp: 'AC 5/3/2023 02:57:28'!
+!GenericsExamples methodsFor: 'as yet unclassified' stamp: 'AC 9/14/2023 13:48:25'!
 example11
 
 	| tmp |
 	
 	tmp := Array with: 1.0.
-	{self} do: [:e | e example10: tmp].
+	{self} do: [:eeee | eeee example10: tmp].
 	
 	"example10: adds a str to tmp, but LiveTyping does not offer type information inside blocks, so the inference algorithm is unable to resolve to which object the 'example10:' message is sent to, thus losing type information. Correct type for tmp is Array<any # SmallFloat64 | String>"! !
 
@@ -5610,13 +5619,13 @@ example8
 	tmp1 at: 1.
 	! !
 
-!GenericsExamples methodsFor: 'as yet unclassified' stamp: 'AC 5/3/2023 04:19:53'!
+!GenericsExamples methodsFor: 'as yet unclassified' stamp: 'AC 9/12/2023 21:51:04'!
 example9
 
 	| tmp1 ret |
 	
 	tmp1 := Array new: 1.
-	self example10: tmp1.
+	self example10: tmp1. "a str is added to tmp inside this method"
 	tmp1 at: 1 put: 1.0.
 	
 	"LiveTyping annotations improve the type shown for x, as the type got by inference is less precise"
